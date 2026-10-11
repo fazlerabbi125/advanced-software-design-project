@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.cache.redis import close_redis_client
 from app.core.config import get_settings
+from app.core.exceptions import install_exception_handlers
 from app.domains.router import api_router
 
 settings = get_settings()
@@ -17,6 +18,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+install_exception_handlers(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allow_origins,

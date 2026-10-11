@@ -29,9 +29,7 @@ async def upload_biometric_image(
     try:
         profile = await service.upload_biometric_image(
             current_user.id,
-            image.filename or "biometric-image",
-            image.content_type or "",
-            await image.read(),
+            image,
         )
     except ValueError as error:
         raise HTTPException(
