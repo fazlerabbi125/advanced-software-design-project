@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import TYPE_CHECKING
+
+import sqlalchemy as sa
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.database import Base, IdMixin, TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.auth import User
+
+
+class MemberProfile(Base, IdMixin, TimestampMixin):
+    __tablename__ = "member_profiles"
+
+    user_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("users.id", ondelete="RESTRICT"), unique=True
+    )
+    date_of_birth: Mapped[date | None] = mapped_column(sa.Date)
+    biometric_image_key: Mapped[str | None] = mapped_column(sa.String(512), unique=True)
+    biometric_content_type: Mapped[str | None] = mapped_column(sa.String(100))
+    biometric_uploaded_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    user: Mapped[User] = relationship(back_populates="member_profile", single_parent=True)

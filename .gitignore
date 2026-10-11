@@ -1,0 +1,11 @@
+.env
+.env.docker
+.venv
+.kilo
+.claude
+.idea
+.vscode
+.ruff_cache
+.uv-cache
+__pycache__
+*.py[cod]
