@@ -31,8 +31,6 @@ class Settings(BaseSettings):
     cors_allow_origins: list[str] = Field(default_factory=list)
     upload_root: Path
     biometric_image_max_bytes: int = MAX_BIOMETRIC_IMAGE_BYTES
-    stripe_secret_key: SecretStr | None = None
-    stripe_webhook_secret: SecretStr | None = None
 
     @property
     def sqlalchemy_url(self) -> URL:
