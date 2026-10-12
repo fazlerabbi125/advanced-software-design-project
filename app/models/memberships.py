@@ -34,6 +34,9 @@ class MembershipPlan(Base, IdMixin, TimestampMixin):
 
     name: Mapped[str] = mapped_column(sa.String(100), unique=True)
     is_active: Mapped[bool] = mapped_column(default=True)
+    price_minor: Mapped[int] = mapped_column(sa.Integer)
+    currency: Mapped[str] = mapped_column(sa.String(3), default="EUR", server_default="EUR")
+    duration_days: Mapped[int] = mapped_column(default=30, server_default="30")
     memberships: Mapped[list[Membership]] = relationship(back_populates="plan")
     entitlements: Mapped[list[PlanEntitlement]] = relationship(
         back_populates="plan", cascade="all, delete-orphan"
@@ -71,5 +74,6 @@ class Membership(Base, IdMixin, TimestampMixin):
     )
     starts_on: Mapped[date] = mapped_column(sa.Date)
     ends_on: Mapped[date] = mapped_column(sa.Date, index=True)
+    payment_reference: Mapped[str | None] = mapped_column(sa.String(64), unique=True)
     user: Mapped[User] = relationship(back_populates="memberships")
     plan: Mapped[MembershipPlan] = relationship(back_populates="memberships")
