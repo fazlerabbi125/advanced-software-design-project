@@ -10,6 +10,7 @@ from app.domains.router import api_router
 
 settings = get_settings()
 
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     yield
@@ -31,3 +32,9 @@ app.include_router(api_router)
 @app.get("/health", tags=["health"])
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host=settings.host, port=settings.port)

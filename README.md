@@ -1,6 +1,25 @@
 ## BFS Gym API
 
-Copy `.env.example` to `.env.docker`, replace the placeholder secrets, then run:
+### Local development
+
+Use your local PostgreSQL instance and pgAdmin. Create a PostgreSQL database and role matching `.env`, then copy `.env.example` to `.env` and replace the placeholder secrets.
+
+```powershell
+uv sync --all-groups
+docker compose -f compose.local.yml --env-file .env up -d
+uv run --env-file .env alembic upgrade head
+uv run --env-file .env fastapi dev app/main.py
+```
+
+Start the optional local worker in another terminal:
+
+```powershell
+uv run --env-file .env celery --app=app.queue.celery_app:celery_app worker --loglevel=INFO --queues=bfs_gym
+```
+
+### Complete Docker setup
+
+Copy `.env.docker.example` to `.env.docker`, replace the placeholder secrets, then run:
 
 ```powershell
 docker compose --env-file .env.docker up --build
@@ -12,7 +31,7 @@ The `migrate` service applies the current schema before the API starts. After cr
 docker compose --env-file .env.docker run --rm migrate
 ```
 
-Swagger is available at `http://localhost:8000/docs` and pgAdmin at `http://localhost:5050`.
+Swagger is available at `http://localhost:8000/docs` and pgAdmin at `http://localhost:5050` in the complete Docker setup.
 
 The cache Redis instance is exposed on port `6379`, is bounded by `CACHE_REDIS_MAXMEMORY`, and uses LRU eviction without persistence. The Celery broker/result Redis instance is exposed on port `6380`, uses AOF with one-second fsync, and rejects writes rather than evicting queued work.
 

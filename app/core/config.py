@@ -1,9 +1,11 @@
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 from sqlalchemy import URL
+
 from app.utils.constants import CELERY_QUEUE_NAME, MAX_BIOMETRIC_IMAGE_BYTES
 
 
