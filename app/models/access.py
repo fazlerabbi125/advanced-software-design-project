@@ -19,6 +19,13 @@ class AccessEvent(enum.StrEnum):
     MANUAL_CHECK_IN = "manual_check_in"
 
 
+class AccessZone(enum.StrEnum):
+    GYM_FLOOR = "gym_floor"
+    VIP_SAUNA = "vip_sauna"
+    VIP_MASSAGE = "vip_massage"
+    VIP_COLD_PLUNGE = "vip_cold_plunge"
+
+
 class AccessLog(IdMixin, TimestampMixin, Base):
     __tablename__ = "access_logs"
 

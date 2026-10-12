@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.core.dependencies import CurrentUser, require_roles
 from app.domains.access.dependencies import AccessServiceDependency
-from app.models.access import AccessEvent
+from app.models.access import AccessEvent, AccessZone
 from app.models.auth import UserRole
 
 router = APIRouter(prefix="/access", tags=["access"])
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/access", tags=["access"])
 
 class CheckInRequest(BaseModel):
     member_id: int | None = Field(default=None, gt=0)
-    zone: str = Field(default="gym_floor", min_length=1, max_length=100)
+    zone: AccessZone = AccessZone.GYM_FLOOR
 
 
 class AccessLogResponse(BaseModel):

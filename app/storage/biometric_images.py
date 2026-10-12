@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -12,9 +13,9 @@ class UploadStream(Protocol):
     filename: str | None
     content_type: str | None
 
-    async def read(self, size: int = -1) -> bytes: ...
+    def read(self, size: int = -1) -> Awaitable[bytes]: ...
 
-    async def close(self) -> None: ...
+    def close(self) -> Awaitable[None]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +36,7 @@ class BiometricImageStorage:
         staging = destination.with_suffix(f"{destination.suffix}.upload")
         await asyncio.to_thread(destination.parent.mkdir, parents=True, exist_ok=True)
         total_size = 0
+        promoted = False
         try:
             file_handle = await asyncio.to_thread(staging.open, "xb")
             try:
@@ -48,9 +50,9 @@ class BiometricImageStorage:
             finally:
                 await asyncio.to_thread(file_handle.close)
             await asyncio.to_thread(staging.replace, destination)
-        except BaseException:
-            await asyncio.to_thread(staging.unlink, missing_ok=True)
-            raise
+            promoted = True
         finally:
+            if not promoted:
+                await asyncio.to_thread(staging.unlink, missing_ok=True)
             await upload.close()
         return StoredBiometricImage(key=key, content_type=content_type)

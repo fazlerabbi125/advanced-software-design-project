@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Mapping
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -43,20 +43,18 @@ def group_validation_errors(exception: RequestValidationError) -> ValidationErro
     return errors
 
 
-async def request_validation_exception_handler(
+def request_validation_exception_handler(
     request: Request, exception: RequestValidationError
 ) -> JSONResponse:
     return build_error_response(
         request,
-        status_code=422,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         message="Request validation failed",
         errors=group_validation_errors(exception),
     )
 
 
-async def http_exception_handler(
-    request: Request, exception: StarletteHTTPException
-) -> JSONResponse:
+def http_exception_handler(request: Request, exception: StarletteHTTPException) -> JSONResponse:
     return build_error_response(
         request,
         status_code=exception.status_code,
@@ -65,11 +63,11 @@ async def http_exception_handler(
     )
 
 
-async def unhandled_exception_handler(request: Request, exception: Exception) -> JSONResponse:
+def unhandled_exception_handler(request: Request, exception: Exception) -> JSONResponse:
     logger.exception("Unhandled exception at %s", request.url.path)
     return build_error_response(
         request,
-        status_code=500,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         message="Internal server error",
     )
 

@@ -5,19 +5,21 @@ from pydantic import BaseModel, Field
 
 from app.core.dependencies import CurrentUser
 from app.domains.bookings.dependencies import BookingServiceDependency
-from app.models.bookings import Booking
+from app.models.bookings import Booking, BookingResourceType
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
 
 class CreateBookingRequest(BaseModel):
     resource_name: str = Field(min_length=1, max_length=150)
+    resource_type: BookingResourceType
     starts_at: datetime
 
 
 class BookingResponse(BaseModel):
     id: int
     resource_name: str
+    resource_type: BookingResourceType
     starts_at: datetime
     status: str
 
@@ -32,6 +34,7 @@ def booking_response(booking: Booking) -> BookingResponse:
     return BookingResponse(
         id=booking.id,
         resource_name=booking.resource_name,
+        resource_type=booking.resource_type,
         starts_at=booking.starts_at,
         status=booking.status.value,
     )
@@ -43,7 +46,12 @@ async def create_booking(
 ) -> BookingResponse:
     try:
         return booking_response(
-            await service.create(current_user.id, payload.resource_name, payload.starts_at)
+            await service.create(
+                current_user.id,
+                payload.resource_name,
+                payload.resource_type,
+                payload.starts_at,
+            )
         )
     except ValueError as error:
         raise HTTPException(

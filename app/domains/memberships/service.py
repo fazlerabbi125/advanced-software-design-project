@@ -3,7 +3,12 @@ from datetime import UTC, date, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.memberships import Membership, MembershipStatus
+from app.models.memberships import (
+    Membership,
+    MembershipEntitlement,
+    MembershipStatus,
+    PlanEntitlement,
+)
 
 
 class MembershipService:
@@ -25,5 +30,25 @@ class MembershipService:
             Membership.status == MembershipStatus.ACTIVE,
             Membership.starts_on <= active_date,
             Membership.ends_on >= active_date,
+        )
+        return await self.session.scalar(statement) is not None
+
+    async def has_entitlement(
+        self,
+        user_id: int,
+        entitlement: MembershipEntitlement,
+        on_date: date | None = None,
+    ) -> bool:
+        active_date = on_date or datetime.now(UTC).date()
+        statement = (
+            select(Membership.id)
+            .join(PlanEntitlement, PlanEntitlement.plan_id == Membership.plan_id)
+            .where(
+                Membership.user_id == user_id,
+                Membership.status == MembershipStatus.ACTIVE,
+                Membership.starts_on <= active_date,
+                Membership.ends_on >= active_date,
+                PlanEntitlement.entitlement == entitlement,
+            )
         )
         return await self.session.scalar(statement) is not None

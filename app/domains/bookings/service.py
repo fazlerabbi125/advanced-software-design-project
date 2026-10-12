@@ -4,7 +4,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.memberships.service import MembershipService
-from app.models.bookings import Booking, BookingStatus, WaitlistEntry, WaitlistStatus
+from app.models.bookings import (
+    Booking,
+    BookingResourceType,
+    BookingStatus,
+    WaitlistEntry,
+    WaitlistStatus,
+)
+from app.models.memberships import MembershipEntitlement
 from app.utils.constants import BOOKING_WINDOW_DAYS
 from app.utils.helpers import utc_now
 
@@ -14,7 +21,13 @@ class BookingService:
         self.session = session
         self.memberships = MembershipService(session)
 
-    async def create(self, user_id: int, resource_name: str, starts_at: datetime) -> Booking:
+    async def create(
+        self,
+        user_id: int,
+        resource_name: str,
+        resource_type: BookingResourceType,
+        starts_at: datetime,
+    ) -> Booking:
         if starts_at.tzinfo is None or starts_at.utcoffset() is None:
             raise ValueError("starts_at must include a timezone offset")
         now = utc_now()
@@ -22,9 +35,21 @@ class BookingService:
             raise ValueError("booking must be in the future")
         if starts_at > now + timedelta(days=BOOKING_WINDOW_DAYS):
             raise ValueError("booking is outside the allowed booking window")
-        if not await self.memberships.has_active_membership(user_id, starts_at.date()):
-            raise ValueError("an active membership is required")
-        booking = Booking(user_id=user_id, resource_name=resource_name.strip(), starts_at=starts_at)
+        required_entitlement = {
+            BookingResourceType.CLASS: MembershipEntitlement.CLASS_BOOKING,
+            BookingResourceType.POOL: MembershipEntitlement.POOL_BOOKING,
+            BookingResourceType.PERSONAL_TRAINING: MembershipEntitlement.PERSONAL_TRAINING,
+        }[resource_type]
+        if not await self.memberships.has_entitlement(
+            user_id, required_entitlement, starts_at.date()
+        ):
+            raise ValueError("your membership plan does not allow this booking type")
+        booking = Booking(
+            user_id=user_id,
+            resource_name=resource_name.strip(),
+            resource_type=resource_type,
+            starts_at=starts_at,
+        )
         self.session.add(booking)
         await self.session.commit()
         await self.session.refresh(booking)

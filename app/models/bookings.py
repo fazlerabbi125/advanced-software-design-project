@@ -18,6 +18,12 @@ class BookingStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class BookingResourceType(StrEnum):
+    CLASS = "class"
+    POOL = "pool"
+    PERSONAL_TRAINING = "personal_training"
+
+
 class WaitlistStatus(StrEnum):
     WAITING = "waiting"
     OFFERED = "offered"
@@ -31,6 +37,14 @@ class Booking(Base, IdMixin, TimestampMixin):
 
     user_id: Mapped[int] = mapped_column(sa.ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     resource_name: Mapped[str] = mapped_column(sa.String(150), index=True)
+    resource_type: Mapped[BookingResourceType] = mapped_column(
+        sa.Enum(
+            BookingResourceType,
+            name="booking_resource_type",
+            native_enum=False,
+            create_constraint=True,
+        )
+    )
     starts_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), index=True)
     status: Mapped[BookingStatus] = mapped_column(
         sa.Enum(BookingStatus, name="booking_status", native_enum=False, create_constraint=True),

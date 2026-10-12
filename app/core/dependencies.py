@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -27,7 +27,7 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
         )
     try:
-        payload = decode_token(credentials.credentials, expected_token_type="access")
+        payload = decode_token(credentials.credentials, expected_type="access")
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(error)) from error
     user = await AuthService(session).get_user_by_id(payload["sub"])
@@ -41,8 +41,8 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-def require_roles(*roles: UserRole) -> Callable[[User], Awaitable[User]]:
-    async def role_guard(current_user: CurrentUser) -> User:
+def require_roles(*roles: UserRole) -> Callable[[User], User]:
+    def role_guard(current_user: CurrentUser) -> User:
         if current_user.role not in roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"

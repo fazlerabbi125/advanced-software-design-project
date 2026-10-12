@@ -71,7 +71,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"resource_name\": \"Pool lane 1\",\n  \"starts_at\": \"2026-11-01T10:00:00Z\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"resource_name\": \"Pool lane 1\",\n  \"resource_type\": \"pool\",\n  \"starts_at\": \"2026-11-01T10:00:00Z\"\n}" },
             "url": "{{baseUrl}}/bookings"
           }
         },
