@@ -8,13 +8,13 @@ Use your local PostgreSQL instance and pgAdmin. Create a PostgreSQL database and
 uv sync --all-groups
 docker compose -f compose.local.yml --env-file .env up -d
 uv run --env-file .env alembic upgrade head
-uv run --env-file .env fastapi dev app/main.py
+uv run --env-file .env -m app.main or uv run --env-file .env fastapi dev app/main.py
 ```
 
 Start the optional local worker in another terminal:
 
 ```powershell
-uv run --env-file .env celery --app=app.queue.celery_app:celery_app worker --loglevel=INFO --queues=bfs_gym
+uv run --env-file .env celery --app=app.queue.celery_app:celery_app worker --pool=solo --loglevel=INFO --queues=bfs_gym
 ```
 
 ### Complete Docker setup

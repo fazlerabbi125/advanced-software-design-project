@@ -11,6 +11,8 @@ from app.utils.constants import CELERY_QUEUE_NAME, MAX_BIOMETRIC_IMAGE_BYTES
 
 class Settings(BaseSettings):
     app_name: str = "BFS Gym API"
+    app_host: str = "127.0.0.1"
+    app_port: int = 8000
     enable_debug: bool = False
     postgres_host: str
     postgres_port: int = 5432
