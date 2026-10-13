@@ -42,3 +42,15 @@ Dependencies are declared in `pyproject.toml` and locked in `uv.lock`. Run `uv r
 - Basic: Gym Floor access.
 - Standard: Basic benefits plus class and pool booking.
 - Premium: Standard benefits plus refreshments, personal training, training plans, and VIP sauna, massage, and cold-plunge access.
+
+## Membership prices
+
+Plans are priced in cent and last 30 days: Basic EUR 30, Standard EUR 45, Premium EUR 70. List them with `GET /api/v1/memberships/plans` and buy one with `POST /api/v1/memberships/purchase` (payments use the mock gateway, which approves every charge).
+
+## Staff and manager accounts
+
+Members register through the API. Create a staff or manager account, or change an existing user's role, with:
+
+```powershell
+docker compose --env-file .env.docker exec api python -m app.scripts.create_user --email staff@bfs-gym.local --password "a-long-password" --role staff
+```
