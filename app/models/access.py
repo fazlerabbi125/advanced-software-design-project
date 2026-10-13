@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import DateTime, Enum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database import Base, IdMixin, TimestampMixin
+from app.models.base import Base, IdMixin, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.auth import User

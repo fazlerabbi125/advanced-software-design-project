@@ -15,7 +15,7 @@ import sys
 
 from sqlalchemy import select
 
-from app.core.database import get_engine, get_session_factory
+from app.core.database import engine, session_factory
 from app.core.security import hash_password
 from app.models.auth import User, UserRole
 from app.utils.constants import MIN_PASSWORD_LENGTH
@@ -35,7 +35,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 async def create_or_update_user(email: str, role: UserRole, password: str | None) -> str:
     normalized_email = normalize_email(email)
-    async with get_session_factory()() as session:
+    async with session_factory() as session:
         user = await session.scalar(select(User).where(User.email == normalized_email))
         if user is not None:
             user.role = role
@@ -60,7 +60,7 @@ async def main(argv: list[str] | None = None) -> int:
         print(f"Error: {error}", file=sys.stderr)
         return 1
     finally:
-        await get_engine().dispose()
+        await engine.dispose()
     return 0
 
 
