@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.auth import User
 from app.models.memberships import (
     Membership,
     MembershipEntitlement,
@@ -71,11 +72,16 @@ class MembershipService:
             raise PlanNotFoundError("membership plan was not found")
 
         today = datetime.now(UTC).date()
+        # Lock this member's row until the transaction ends, so two purchases for the
+        # same member run one after the other and the second sees the first membership.
+        await self.session.execute(select(User.id).where(User.id == user_id).with_for_update())
         if await self.has_active_membership(user_id, today):
+            await self.session.rollback()
             raise ActiveMembershipExistsError("you already have an active membership")
 
         payment = self.payment_gateway.charge(plan.price_minor, plan.currency)
         if payment.status != PaymentStatus.APPROVED:
+            await self.session.rollback()
             raise PaymentDeclinedError("payment was declined")
 
         membership = Membership(
