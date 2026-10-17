@@ -71,10 +71,10 @@ class MembershipService:
         if plan is None:
             raise PlanNotFoundError("membership plan was not found")
 
-        today = datetime.now(UTC).date()
         # Lock this member's row until the transaction ends, so two purchases for the
         # same member run one after the other and the second sees the first membership.
         await self.session.execute(select(User.id).where(User.id == user_id).with_for_update())
+        today = datetime.now(UTC).date()
         if await self.has_active_membership(user_id, today):
             await self.session.rollback()
             raise ActiveMembershipExistsError("you already have an active membership")
