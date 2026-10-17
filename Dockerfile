@@ -15,11 +15,10 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY app ./app
-COPY alembic ./alembic
+COPY migrations ./migrations
 COPY alembic.ini ./
-RUN uv sync --frozen --no-dev
-
-RUN groupadd --system app && useradd --system --gid app --create-home app && \
+RUN uv sync --frozen --no-dev \
+&& groupadd --system app && useradd --system --gid app --create-home app && \
     mkdir /app/uploads && chown -R app:app /app
 
 USER app

@@ -9,8 +9,6 @@ services:
     <<: *environment
     build: .
     command: alembic upgrade head
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
       postgres:
         condition: service_healthy
@@ -19,12 +17,6 @@ services:
     <<: *environment
     build: .
     command: fastapi dev app/main.py --host 0.0.0.0 --port 8000
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      CACHE_REDIS_URL: redis://cache-redis:6379/0
-      CELERY_BROKER_URL: redis://queue-redis:6379/0
-      CELERY_RESULT_BACKEND: redis://queue-redis:6379/1
-      UPLOAD_ROOT: /app/uploads
     ports:
       - 127.0.0.1:${APP_PORT}:8000
     volumes:
@@ -44,10 +36,6 @@ services:
     <<: *environment
     build: .
     command: celery --app=app.queue.celery_app:celery_app worker --loglevel=INFO --queues=${CELERY_DEFAULT_QUEUE}
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      CELERY_BROKER_URL: redis://queue-redis:6379/0
-      CELERY_RESULT_BACKEND: redis://queue-redis:6379/1
     profiles:
       - worker
     volumes:

@@ -15,7 +15,6 @@ dependencies = [
     "python-multipart>=0.0.20",
     "redis>=6.4.0",
     "sqlalchemy[asyncio]>=2.1.4",
-    "stripe>=16.0.0",
     "uvicorn>=0.54.0",
 ]
 

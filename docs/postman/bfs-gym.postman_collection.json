@@ -60,6 +60,26 @@
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
             "url": "{{baseUrl}}/memberships/me"
           }
+        },
+        {
+          "name": "List membership plans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/memberships/plans"
+          }
+        },
+        {
+          "name": "Purchase membership",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"plan_id\": 3\n}" },
+            "url": "{{baseUrl}}/memberships/purchase"
+          }
         }
       ]
     },
@@ -71,7 +91,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"resource_name\": \"Pool lane 1\",\n  \"starts_at\": \"2026-11-01T10:00:00Z\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"resource_name\": \"Pool lane 1\",\n  \"resource_type\": \"pool\",\n  \"starts_at\": \"2026-11-01T10:00:00Z\"\n}" },
             "url": "{{baseUrl}}/bookings"
           }
         },

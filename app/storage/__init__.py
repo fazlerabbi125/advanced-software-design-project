@@ -1,3 +1,3 @@
-from app.storage.biometric_images import BiometricImageStorage
+from app.storage.biometric_images import BiometricImageStorage, StoredBiometricImage, UploadStream
 
-__all__ = ["BiometricImageStorage"]
+__all__ = ["BiometricImageStorage", "StoredBiometricImage", "UploadStream"]
