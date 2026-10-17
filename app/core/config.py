@@ -6,7 +6,11 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 from sqlalchemy import URL
 
-from app.utils.constants import CELERY_QUEUE_NAME, MAX_BIOMETRIC_IMAGE_BYTES
+from app.utils.constants import (
+    CELERY_QUEUE_NAME,
+    MAX_BIOMETRIC_IMAGE_BYTES,
+    VIP_ROOM_CAPACITY,
+)
 
 
 class Settings(BaseSettings):
@@ -33,6 +37,7 @@ class Settings(BaseSettings):
     cors_allow_origins: list[str] = Field(default_factory=list)
     upload_root: Path
     biometric_image_max_bytes: int = MAX_BIOMETRIC_IMAGE_BYTES
+    vip_room_capacity: int = Field(default=VIP_ROOM_CAPACITY, gt=0)
 
     @property
     def sqlalchemy_url(self) -> URL:
