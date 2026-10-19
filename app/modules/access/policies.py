@@ -5,7 +5,7 @@ from redis.exceptions import RedisError
 
 from app.models.access import AccessZone
 from app.models.memberships import MembershipEntitlement
-from app.modules.access.occupancy import ZoneOccupancy
+from app.modules.access.occupancy import EntryOutcome, ZoneOccupancy
 from app.modules.memberships.service import MembershipService
 from app.utils.constants import ZONE_STAY_MINUTES
 
@@ -23,10 +23,12 @@ class ZoneFullError(AccessDeniedError):
 class AccessPolicy(Protocol):
     """A rule that decides whether a member may enter a zone."""
 
-    async def check(self, member_id: int, zone: AccessZone) -> None:
+    async def check(self, member_id: int, zone: AccessZone) -> bool:
         """Admit the member, or raise AccessDeniedError to refuse entry.
 
-        Returning normally means the member is let in and counted in the zone.
+        Returning normally means the member is let in and counted in the zone. Returns
+        True when this call took a new place, so the caller knows to give it back if
+        the entry cannot be recorded; False when the member already held one.
         """
         ...
 
@@ -42,16 +44,18 @@ class GymFloorPolicy:
         self.memberships = memberships
         self.occupancy = occupancy
 
-    async def check(self, member_id: int, zone: AccessZone) -> None:
+    async def check(self, member_id: int, zone: AccessZone) -> bool:
         if not await self.memberships.has_entitlement(
             member_id, MembershipEntitlement.GYM_FLOOR_ACCESS
         ):
             raise AccessDeniedError("your membership plan does not allow access to this zone")
         try:
-            await self.occupancy.enter(zone.value, member_id, stay_seconds(zone))
+            outcome = await self.occupancy.enter(zone.value, member_id, stay_seconds(zone))
         except RedisError:
             # The gym floor count is for information only, so entry still goes ahead.
             logger.exception("Unable to count entry to zone %s", zone.value)
+            return False
+        return outcome == EntryOutcome.ADMITTED
 
 
 class VipAreaPolicy:
@@ -64,13 +68,13 @@ class VipAreaPolicy:
         self.occupancy = occupancy
         self.capacity = capacity
 
-    async def check(self, member_id: int, zone: AccessZone) -> None:
+    async def check(self, member_id: int, zone: AccessZone) -> bool:
         if not await self.memberships.has_entitlement(
             member_id, MembershipEntitlement.VIP_AREA_ACCESS
         ):
             raise AccessDeniedError("your membership plan does not allow access to this zone")
         try:
-            admitted = await self.occupancy.enter(
+            outcome = await self.occupancy.enter(
                 zone.value, member_id, stay_seconds(zone), self.capacity
             )
         except RedisError as error:
@@ -79,9 +83,10 @@ class VipAreaPolicy:
             raise AccessDeniedError(
                 "VIP entry is unavailable right now, please ask a member of staff"
             ) from error
-        if not admitted:
+        if outcome == EntryOutcome.FULL:
             room = zone.value.removeprefix("vip_").replace("_", " ")
             raise ZoneFullError(f"the {room} is full, please try again shortly")
+        return outcome == EntryOutcome.ADMITTED
 
 
 def build_policies(

@@ -42,7 +42,7 @@ class AccessService:
         if policy is None:
             raise AccessDeniedError("no access rule is set up for this zone")
         # On success the policy has already counted the member in the zone.
-        await policy.check(member_id, zone)
+        took_new_place = await policy.check(member_id, zone)
 
         access_log = AccessLog(
             member_id=member_id,
@@ -55,8 +55,10 @@ class AccessService:
         try:
             await self.session.commit()
         except Exception:
-            # The entry was not recorded, so give the place back.
-            await self.release_place(member_id, zone)
+            # The entry was not recorded, so give back a place this check-in took. A member
+            # who was already inside keeps the place their earlier check-in gave them.
+            if took_new_place:
+                await self.release_place(member_id, zone)
             raise
         await self.session.refresh(access_log)
         return access_log

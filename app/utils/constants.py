@@ -2,8 +2,9 @@ from enum import Enum
 
 
 class CacheKey(Enum):
-    # The occupancy set is kept for a day after the last entry, then Redis clears it.
-    OCCUPANCY = ("occupancy", 24 * 60 * 60)
+    # Visits per zone, kept for a day after the last entry. Named apart from the old
+    # "occupancy" counter keys, which hold a different Redis type.
+    OCCUPANCY = ("zone-visits", 24 * 60 * 60)
 
     @property
     def prefix(self) -> str:

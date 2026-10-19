@@ -1,4 +1,5 @@
 import time
+from enum import StrEnum
 
 from redis.asyncio import Redis
 
@@ -8,17 +9,31 @@ from app.utils.constants import CacheKey
 # Runs inside Redis as a single step, so two people arriving at the same moment
 # cannot both take the last free place.
 # KEYS[1] = zone set. ARGV = now, visit end time, member id, capacity (0 = no limit), key TTL.
+# Returns 1 when the member is let in, 0 when they were already inside (their visit is
+# extended), and -1 when the zone is full.
 ENTER_SCRIPT = """
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+if redis.call('ZSCORE', KEYS[1], ARGV[3]) then
+    redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3])
+    return 0
+end
 local capacity = tonumber(ARGV[4])
-local already_inside = redis.call('ZSCORE', KEYS[1], ARGV[3])
-if capacity > 0 and not already_inside and redis.call('ZCARD', KEYS[1]) >= capacity then
+if capacity > 0 and redis.call('ZCARD', KEYS[1]) >= capacity then
     return -1
 end
 redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3])
 redis.call('EXPIRE', KEYS[1], ARGV[5])
-return redis.call('ZCARD', KEYS[1])
+return 1
 """
+
+
+class EntryOutcome(StrEnum):
+    ADMITTED = "admitted"
+    ALREADY_INSIDE = "already_inside"
+    FULL = "full"
+
+
+ENTRY_OUTCOMES = {1: EntryOutcome.ADMITTED, 0: EntryOutcome.ALREADY_INSIDE, -1: EntryOutcome.FULL}
 
 
 class ZoneOccupancy:
@@ -35,8 +50,8 @@ class ZoneOccupancy:
 
     async def enter(
         self, zone: str, member_id: int, stay_seconds: int, capacity: int | None = None
-    ) -> bool:
-        """Hold a place for the member. Returns False when the zone is already full."""
+    ) -> EntryOutcome:
+        """Hold a place for the member, unless the zone is full."""
         now = time.time()
         result = await self.client.eval(
             ENTER_SCRIPT,
@@ -48,7 +63,7 @@ class ZoneOccupancy:
             capacity or 0,
             CacheKey.OCCUPANCY.ttl_seconds,
         )
-        return int(result) >= 0
+        return ENTRY_OUTCOMES[int(result)]
 
     async def leave(self, zone: str, member_id: int) -> None:
         await self.client.zrem(CacheKey.OCCUPANCY.build(zone), member_id)
