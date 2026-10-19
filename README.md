@@ -51,6 +51,12 @@ Plans are priced in cent and last 30 days: Basic EUR 30, Standard EUR 45, Premiu
 
 Each VIP room (sauna, massage, cold plunge) holds at most `VIP_ROOM_CAPACITY` people at once (default 8); a check-in to a full room returns 409. A visit counts towards a zone for a fixed time (sauna 30 min, massage 60, cold plunge 15, gym floor 180), after which the member is counted out automatically; checking out earlier frees the place straight away. Staff and managers can see the live counts with `GET /api/v1/access/occupancy`.
 
+When a VIP room is full, the member is put on that room's waiting list and the 409 response tells them their position. Places that free up go to the front of the list first, so nobody can jump the queue; a member who does not come back within 30 minutes loses their place. Members can check their position with `GET /api/v1/access/waitlist/{zone}` and leave with `DELETE /api/v1/access/waitlist/{zone}`.
+
+## Face-recognition door scanners
+
+Face matching happens on the scanner, not in this API. When a scanner recognises a member it calls `POST /api/v1/access/device-check-in` with `{"member_id": 3}` and its secret key in the `X-Device-Key` header. Each key is mapped to the zone its door opens in `SCANNER_DEVICE_KEYS`, for example `SCANNER_DEVICE_KEYS='{"a-long-random-key": "vip_sauna"}'`. The usual entry rules apply, and the entry is logged with `source: face_recognition`.
+
 ## Staff and manager accounts
 
 Members register through the API. Create a staff or manager account, or change an existing user's role, with:

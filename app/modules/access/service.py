@@ -82,6 +82,12 @@ class AccessService:
         except RedisError:
             logger.exception("Unable to update occupancy for zone %s", zone.value)
 
+    async def waitlist_position(self, member_id: int, zone: AccessZone) -> int | None:
+        return await self.occupancy.waitlist_position(zone.value, member_id)
+
+    async def leave_waitlist(self, member_id: int, zone: AccessZone) -> None:
+        await self.occupancy.leave_waitlist(zone.value, member_id)
+
     async def current_occupancy(self) -> dict[str, int]:
         return {zone.value: await self.occupancy.count(zone.value) for zone in AccessZone}
 

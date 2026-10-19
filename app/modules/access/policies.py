@@ -17,7 +17,13 @@ class AccessDeniedError(ValueError):
 
 
 class ZoneFullError(AccessDeniedError):
-    """Raised when a zone has no free places left."""
+    """Raised when a zone has no free place, after putting the member on its waiting list."""
+
+    def __init__(self, zone: AccessZone, position: int) -> None:
+        self.zone = zone
+        self.position = position
+        room = zone.value.removeprefix("vip_").replace("_", " ")
+        super().__init__(f"the {room} is full, you are number {position} on the waiting list")
 
 
 class AccessPolicy(Protocol):
@@ -50,16 +56,19 @@ class GymFloorPolicy:
         ):
             raise AccessDeniedError("your membership plan does not allow access to this zone")
         try:
-            outcome = await self.occupancy.enter(zone.value, member_id, stay_seconds(zone))
+            entry = await self.occupancy.enter(zone.value, member_id, stay_seconds(zone))
         except RedisError:
             # The gym floor count is for information only, so entry still goes ahead.
             logger.exception("Unable to count entry to zone %s", zone.value)
             return False
-        return outcome == EntryOutcome.ADMITTED
+        return entry.outcome == EntryOutcome.ADMITTED
 
 
 class VipAreaPolicy:
-    """Members whose plan includes the VIP area may enter a VIP room while it has space."""
+    """Members whose plan includes the VIP area may enter a VIP room while it has space.
+
+    When the room is full the member joins its waiting list instead.
+    """
 
     def __init__(
         self, memberships: MembershipService, occupancy: ZoneOccupancy, capacity: int
@@ -74,7 +83,7 @@ class VipAreaPolicy:
         ):
             raise AccessDeniedError("your membership plan does not allow access to this zone")
         try:
-            outcome = await self.occupancy.enter(
+            entry = await self.occupancy.enter(
                 zone.value, member_id, stay_seconds(zone), self.capacity
             )
         except RedisError as error:
@@ -83,10 +92,9 @@ class VipAreaPolicy:
             raise AccessDeniedError(
                 "VIP entry is unavailable right now, please ask a member of staff"
             ) from error
-        if outcome == EntryOutcome.FULL:
-            room = zone.value.removeprefix("vip_").replace("_", " ")
-            raise ZoneFullError(f"the {room} is full, please try again shortly")
-        return outcome == EntryOutcome.ADMITTED
+        if entry.outcome == EntryOutcome.WAITLISTED:
+            raise ZoneFullError(zone, entry.waitlist_position or 1)
+        return entry.outcome == EntryOutcome.ADMITTED
 
 
 def build_policies(

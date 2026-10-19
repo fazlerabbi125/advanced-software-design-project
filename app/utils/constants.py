@@ -5,6 +5,7 @@ class CacheKey(Enum):
     # Visits per zone, kept for a day after the last entry. Named apart from the old
     # "occupancy" counter keys, which hold a different Redis type.
     OCCUPANCY = ("zone-visits", 24 * 60 * 60)
+    VIP_WAITLIST = ("vip-waitlist", 24 * 60 * 60)
 
     @property
     def prefix(self) -> str:
@@ -28,6 +29,8 @@ ZONE_STAY_MINUTES = {
     "vip_cold_plunge": 15,
 }
 VIP_ROOM_CAPACITY = 8
+# A member who does not come back within this time loses their place on a VIP waiting list.
+VIP_WAITLIST_HOLD_MINUTES = 30
 CELERY_QUEUE_NAME = "bfs_gym"
 DEFAULT_PAGE_SIZE = 20
 HEALTH_CHECK_TIMEOUT_SECONDS = 5
