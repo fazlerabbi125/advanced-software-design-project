@@ -53,7 +53,7 @@ class MembershipService:
     async def list_plans(self) -> list[MembershipPlan]:
         statement = (
             select(MembershipPlan)
-            .where(MembershipPlan.is_active.is_(True))
+            .where(MembershipPlan.is_active.is_(True), MembershipPlan.price_minor > 0)
             .options(selectinload(MembershipPlan.entitlements))
             .order_by(MembershipPlan.price_minor)
         )
@@ -63,9 +63,12 @@ class MembershipService:
         if self.payment_gateway is None:
             raise RuntimeError("MembershipService was created without a payment gateway")
 
+        # A plan without a price is not on sale, so it is treated as not found.
         plan = await self.session.scalar(
             select(MembershipPlan).where(
-                MembershipPlan.id == plan_id, MembershipPlan.is_active.is_(True)
+                MembershipPlan.id == plan_id,
+                MembershipPlan.is_active.is_(True),
+                MembershipPlan.price_minor > 0,
             )
         )
         if plan is None:
