@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.models.access import AccessEvent
 from app.models.auth import UserRole
 from app.modules.access.dependencies import AccessServiceDependency
+from app.modules.access.policies import ZoneFullError
 from app.modules.access.schemas import AccessLogResponse, CheckInRequest
 from app.modules.auth.dependencies import CurrentUser, require_roles
 
@@ -24,6 +25,8 @@ async def check_in(
         )
     try:
         access_log = await service.check_in(member_id, payload.zone)
+    except ZoneFullError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
     return AccessLogResponse(
@@ -55,6 +58,8 @@ async def manual_check_in(
             source="manual",
             event=AccessEvent.MANUAL_CHECK_IN,
         )
+    except ZoneFullError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
     return AccessLogResponse(
@@ -87,3 +92,12 @@ async def check_out(
         source=access_log.source,
         occurred_at=access_log.occurred_at,
     )
+
+
+@router.get("/occupancy", response_model=dict[str, int])
+async def current_occupancy(
+    service: AccessServiceDependency,
+    _: Annotated[object, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
+) -> dict[str, int]:
+    """Number of people currently inside each zone (staff and managers only)."""
+    return await service.current_occupancy()

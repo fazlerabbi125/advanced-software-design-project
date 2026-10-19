@@ -47,6 +47,10 @@ Dependencies are declared in `pyproject.toml` and locked in `uv.lock`. Run `uv r
 
 Plans are priced in cent and last 30 days: Basic EUR 30, Standard EUR 45, Premium EUR 70. List them with `GET /api/v1/memberships/plans` and buy one with `POST /api/v1/memberships/purchase` (payments use the mock gateway, which approves every charge).
 
+## VIP rooms and occupancy
+
+Each VIP room (sauna, massage, cold plunge) holds at most `VIP_ROOM_CAPACITY` people at once (default 8); a check-in to a full room returns 409. A visit counts towards a zone for a fixed time (sauna 30 min, massage 60, cold plunge 15, gym floor 180), after which the member is counted out automatically; checking out earlier frees the place straight away. Staff and managers can see the live counts with `GET /api/v1/access/occupancy`.
+
 ## Staff and manager accounts
 
 Members register through the API. Create a staff or manager account, or change an existing user's role, with:

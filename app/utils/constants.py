@@ -2,8 +2,9 @@ from enum import Enum
 
 
 class CacheKey(Enum):
-    OCCUPANCY = ("occupancy", 300)
-    OCCUPANCY_LOCK = ("occupancy:lock", 5)
+    # Visits per zone, kept for a day after the last entry. Named apart from the old
+    # "occupancy" counter keys, which hold a different Redis type.
+    OCCUPANCY = ("zone-visits", 24 * 60 * 60)
 
     @property
     def prefix(self) -> str:
@@ -19,6 +20,14 @@ class CacheKey(Enum):
 
 
 BOOKING_WINDOW_DAYS = 7
+# How long a visit counts towards a zone's occupancy before the member is treated as gone.
+ZONE_STAY_MINUTES = {
+    "gym_floor": 180,
+    "vip_sauna": 30,
+    "vip_massage": 60,
+    "vip_cold_plunge": 15,
+}
+VIP_ROOM_CAPACITY = 8
 CELERY_QUEUE_NAME = "bfs_gym"
 DEFAULT_PAGE_SIZE = 20
 HEALTH_CHECK_TIMEOUT_SECONDS = 5

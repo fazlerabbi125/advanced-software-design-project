@@ -5,8 +5,9 @@ from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.access import AccessEvent, AccessLog, AccessZone
-from app.modules.access.occupancy import decrement_occupancy, increment_occupancy
+from app.modules.access.occupancy import ZoneOccupancy, get_zone_occupancy
 from app.modules.access.policies import AccessDeniedError, AccessPolicy, build_policies
 from app.modules.memberships.service import MembershipService
 from app.utils.helpers import utc_now
@@ -19,10 +20,16 @@ class AccessService:
         self,
         session: AsyncSession,
         policies: Mapping[AccessZone, AccessPolicy] | None = None,
+        occupancy: ZoneOccupancy | None = None,
     ):
         self.session = session
         self.memberships = MembershipService(session)
-        self.policies = policies if policies is not None else build_policies(self.memberships)
+        self.occupancy = occupancy if occupancy is not None else get_zone_occupancy()
+        self.policies = (
+            policies
+            if policies is not None
+            else build_policies(self.memberships, self.occupancy, get_settings().vip_room_capacity)
+        )
 
     async def check_in(
         self,
@@ -34,7 +41,8 @@ class AccessService:
         policy = self.policies.get(zone)
         if policy is None:
             raise AccessDeniedError("no access rule is set up for this zone")
-        await policy.check(member_id, zone)
+        # On success the policy has already counted the member in the zone.
+        took_new_place = await policy.check(member_id, zone)
 
         access_log = AccessLog(
             member_id=member_id,
@@ -44,12 +52,15 @@ class AccessService:
             occurred_at=utc_now(),
         )
         self.session.add(access_log)
-        await self.session.commit()
-        await self.session.refresh(access_log)
         try:
-            await increment_occupancy(zone.value)
-        except RedisError:
-            logger.exception("Unable to increment occupancy for zone %s", zone.value)
+            await self.session.commit()
+        except Exception:
+            # The entry was not recorded, so give back a place this check-in took. A member
+            # who was already inside keeps the place their earlier check-in gave them.
+            if took_new_place:
+                await self.release_place(member_id, zone)
+            raise
+        await self.session.refresh(access_log)
         return access_log
 
     async def check_out(self, member_id: int, zone: AccessZone) -> AccessLog:
@@ -62,11 +73,17 @@ class AccessService:
         self.session.add(access_log)
         await self.session.commit()
         await self.session.refresh(access_log)
-        try:
-            await decrement_occupancy(zone.value)
-        except RedisError:
-            logger.exception("Unable to decrement occupancy for zone %s", zone.value)
+        await self.release_place(member_id, zone)
         return access_log
+
+    async def release_place(self, member_id: int, zone: AccessZone) -> None:
+        try:
+            await self.occupancy.leave(zone.value, member_id)
+        except RedisError:
+            logger.exception("Unable to update occupancy for zone %s", zone.value)
+
+    async def current_occupancy(self) -> dict[str, int]:
+        return {zone.value: await self.occupancy.count(zone.value) for zone in AccessZone}
 
     async def list_member_access(self, member_id: int) -> list[AccessLog]:
         result = await self.session.scalars(
