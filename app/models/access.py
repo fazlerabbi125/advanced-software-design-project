@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import DateTime, Enum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.database import Base, IdMixin, TimestampMixin
+from app.models.base import Base, IdMixin, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.auth import User
@@ -17,6 +17,13 @@ class AccessEvent(enum.StrEnum):
     CHECK_IN = "check_in"
     CHECK_OUT = "check_out"
     MANUAL_CHECK_IN = "manual_check_in"
+
+
+class AccessZone(enum.StrEnum):
+    GYM_FLOOR = "gym_floor"
+    VIP_SAUNA = "vip_sauna"
+    VIP_MASSAGE = "vip_massage"
+    VIP_COLD_PLUNGE = "vip_cold_plunge"
 
 
 class AccessLog(IdMixin, TimestampMixin, Base):

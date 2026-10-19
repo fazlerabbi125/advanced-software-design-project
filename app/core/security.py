@@ -34,7 +34,7 @@ def create_access_token(subject: int, role: str) -> str:
         "iss": settings.jwt_issuer,
         "aud": settings.jwt_audience,
         "iat": now,
-        "exp": now + timedelta(minutes=settings.jwt_access_token_minutes),
+        "exp": now + timedelta(seconds=settings.jwt_access_expiration),
     }
     return jwt.encode(
         payload,
@@ -49,7 +49,7 @@ def create_refresh_token(
     settings = get_settings()
     now = datetime.now(UTC)
     jti = str(uuid4())
-    expires_at = now + timedelta(days=settings.jwt_refresh_token_days)
+    expires_at = now + timedelta(seconds=settings.jwt_refresh_expiration)
     payload = {
         "sub": str(subject),
         "jti": jti,
