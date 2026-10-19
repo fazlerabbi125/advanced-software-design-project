@@ -51,6 +51,13 @@ Plans are priced in cent and last 30 days: Basic EUR 30, Standard EUR 45, Premiu
 
 Each VIP room (sauna, massage, cold plunge) holds at most `VIP_ROOM_CAPACITY` people at once (default 8); a check-in to a full room returns 409. A visit counts towards a zone for a fixed time (sauna 30 min, massage 60, cold plunge 15, gym floor 180), after which the member is counted out automatically; checking out earlier frees the place straight away. Staff and managers can see the live counts with `GET /api/v1/access/occupancy`.
 
+## Renewing and cancelling
+
+A membership is active, expired (past its end date) or cancelled, and what members can do depends on that state:
+
+- `POST /api/v1/memberships/me/renew` renews on the same plan and charges again. An active membership gets another period added after its current end date; an expired one starts again from today; a cancelled one cannot be renewed (buy a new plan instead).
+- `POST /api/v1/memberships/me/cancel` cancels an active membership. Access stops straight away and there is no refund.
+
 ## Staff and manager accounts
 
 Members register through the API. Create a staff or manager account, or change an existing user's role, with:
