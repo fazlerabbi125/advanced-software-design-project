@@ -19,7 +19,6 @@ class CacheKey(Enum):
         return ":".join((self.prefix, *normalized_parts))
 
 
-BOOKING_WINDOW_DAYS = 7
 # How long a visit counts towards a zone's occupancy before the member is treated as gone.
 ZONE_STAY_MINUTES = {
     "gym_floor": 180,

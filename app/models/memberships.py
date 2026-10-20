@@ -31,12 +31,18 @@ class MembershipEntitlement(StrEnum):
 
 class MembershipPlan(Base, IdMixin, TimestampMixin):
     __tablename__ = "membership_plans"
+    __table_args__ = (
+        sa.CheckConstraint("booking_window_days >= 0", name="booking_window_nonnegative"),
+        sa.CheckConstraint("weekly_booking_limit >= 0", name="weekly_limit_nonnegative"),
+    )
 
     name: Mapped[str] = mapped_column(sa.String(100), unique=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     price_minor: Mapped[int] = mapped_column(sa.Integer)
     currency: Mapped[str] = mapped_column(sa.String(3), default="EUR", server_default="EUR")
     duration_days: Mapped[int] = mapped_column(default=30, server_default="30")
+    booking_window_days: Mapped[int] = mapped_column(default=2, server_default="2")
+    weekly_booking_limit: Mapped[int] = mapped_column(default=3, server_default="3")
     memberships: Mapped[list[Membership]] = relationship(back_populates="plan")
     entitlements: Mapped[list[PlanEntitlement]] = relationship(
         back_populates="plan", cascade="all, delete-orphan"

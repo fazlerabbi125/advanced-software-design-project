@@ -1,8 +1,9 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.auth import User
 from app.models.bookings import (
     Booking,
     BookingResourceType,
@@ -10,9 +11,13 @@ from app.models.bookings import (
     WaitlistEntry,
     WaitlistStatus,
 )
-from app.models.memberships import MembershipEntitlement
+from app.modules.bookings.eligibility import (
+    BookingContext,
+    BookingEligibilityError,
+    build_eligibility_chain,
+    week_bounds,
+)
 from app.modules.memberships.service import MembershipService
-from app.utils.constants import BOOKING_WINDOW_DAYS
 from app.utils.helpers import utc_now
 
 
@@ -30,20 +35,45 @@ class BookingService:
     ) -> Booking:
         if starts_at.tzinfo is None or starts_at.utcoffset() is None:
             raise ValueError("starts_at must include a timezone offset")
+        starts_at = starts_at.astimezone(UTC)
+        # Serialize this member's eligibility check and write, including membership changes.
+        await self.session.execute(select(User.id).where(User.id == user_id).with_for_update())
         now = utc_now()
-        if starts_at <= now:
-            raise ValueError("booking must be in the future")
-        if starts_at > now + timedelta(days=BOOKING_WINDOW_DAYS):
-            raise ValueError("booking is outside the allowed booking window")
-        required_entitlement = {
-            BookingResourceType.CLASS: MembershipEntitlement.CLASS_BOOKING,
-            BookingResourceType.POOL: MembershipEntitlement.POOL_BOOKING,
-            BookingResourceType.PERSONAL_TRAINING: MembershipEntitlement.PERSONAL_TRAINING,
-        }[resource_type]
-        if not await self.memberships.has_entitlement(
-            user_id, required_entitlement, starts_at.date()
-        ):
-            raise ValueError("your membership plan does not allow this booking type")
+        membership = await self.memberships.booking_membership(user_id, now.date())
+        week_start, week_end = week_bounds(starts_at)
+        bookings = list(
+            (
+                await self.session.scalars(
+                    select(Booking).where(
+                        Booking.user_id == user_id,
+                        Booking.starts_at >= week_start,
+                        Booking.starts_at < week_end,
+                    )
+                )
+            ).all()
+        )
+        failures = build_eligibility_chain().handle(
+            BookingContext(now, starts_at, resource_type, membership, bookings)
+        )
+        if failures:
+            await self.session.rollback()
+            raise BookingEligibilityError(failures)
+        # The existing unique constraint includes cancelled bookings. Reuse that row
+        # so cancelling and then rebooking the same slot does not raise an IntegrityError.
+        booking = next(
+            (
+                item
+                for item in bookings
+                if item.resource_name == resource_name.strip() and item.starts_at == starts_at
+            ),
+            None,
+        )
+        if booking is not None:
+            booking.status = BookingStatus.CONFIRMED
+            booking.resource_type = resource_type
+            await self.session.commit()
+            await self.session.refresh(booking)
+            return booking
         booking = Booking(
             user_id=user_id,
             resource_name=resource_name.strip(),
