@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.access import AccessEvent, AccessLog, AccessZone
+from app.models.auth import User
 from app.modules.access.occupancy import ZoneOccupancy, get_zone_occupancy
 from app.modules.access.policies import AccessDeniedError, AccessPolicy, build_policies
 from app.modules.memberships.service import MembershipService
@@ -38,6 +39,11 @@ class AccessService:
         source: str = "biometric",
         event: AccessEvent = AccessEvent.CHECK_IN,
     ) -> AccessLog:
+        # Scanner and staff check-ins name the member directly, so the account itself must be
+        # checked here; a disabled account is refused even if its membership is still active.
+        member = await self.session.get(User, member_id)
+        if member is None or not member.is_active:
+            raise AccessDeniedError("this member account is not active")
         policy = self.policies.get(zone)
         if policy is None:
             raise AccessDeniedError("no access rule is set up for this zone")
@@ -81,6 +87,12 @@ class AccessService:
             await self.occupancy.leave(zone.value, member_id)
         except RedisError:
             logger.exception("Unable to update occupancy for zone %s", zone.value)
+
+    async def waitlist_position(self, member_id: int, zone: AccessZone) -> int | None:
+        return await self.occupancy.waitlist_position(zone.value, member_id)
+
+    async def leave_waitlist(self, member_id: int, zone: AccessZone) -> None:
+        await self.occupancy.leave_waitlist(zone.value, member_id)
 
     async def current_occupancy(self) -> dict[str, int]:
         return {zone.value: await self.occupancy.count(zone.value) for zone in AccessZone}
