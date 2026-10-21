@@ -58,3 +58,65 @@ Members register through the API. Create a staff or manager account, or change a
 ```powershell
 docker compose --env-file .env.docker exec api python -m app.scripts.create_user --email staff@bfs-gym.local --password "a-long-password" --role staff
 ```
+
+## Booking eligibility (Chain of Responsibility)
+
+`BookingService.create` loads the current membership, plan and requested week's bookings,
+then passes a `BookingContext` through the handlers in
+`app/modules/bookings/eligibility.py`. Every handler forwards to its successor even when
+it fails. Rejections return HTTP 422 with a `detail` array of `{code, message}` entries.
+Invalid request data (including a missing timezone) retains the normal validation response.
+
+The chain checks future start time, active membership covering the session, plan entitlement,
+booking window, weekly limit, and another confirmed booking at the same instant. Missing
+membership is reported once; checks needing an unknown plan are not evaluated. Limits are
+stored on `membership_plans`: Basic 2 days / 3 bookings, Standard 3 / 5, Premium 7 / 10.
+Run `alembic upgrade head` before using the change. Custom plans default to Basic limits;
+set their database values explicitly as needed. There is not yet a manager configuration API.
+Windows are rolling 24-hour days, inclusive at the boundary. Weeks and membership dates use
+UTC; weekly counts use the requested session's Monday–Sunday week, excluding cancellations.
+
+A user-row lock covers membership lookup, eligibility checks and insertion. This prevents
+parallel requests by the same member from exceeding the weekly limit. Cancelling and
+rebooking an identical slot reuses the cancelled row because the existing unique constraint
+also covers cancelled rows. The API request shape is unchanged.
+
+To add a rule, implement `EligibilityRule.check` and register the class in `DEFAULT_RULES`.
+Keep database reads and writes in the service; handlers consume the loaded context.
+
+### Remaining report requirements
+
+The current model has only confirmed/cancelled bookings, a resource name/type and a start
+time. This implementation does **not** claim full report compliance:
+
+- Full interval conflicts need authoritative session end times. Replace `SameStartRule`
+  when those exist and load bookings overlapping the interval, including the previous week.
+- Shared capacity and unit allocation need a timetable/session record and station/lane
+  inventory. Check and allocate under a session-row lock in the booking transaction;
+  the user-row lock does not protect capacity between different members.
+- Equipment daily caps need equipment types and equipment bookings (currently unsupported).
+- Suspension needs persisted suspension dates or an agreed no-show history mechanism.
+- Once checked-in/no-show statuses exist, include them in the weekly count. Reuse the chain
+  for waitlist acceptance when the session-based waitlist/offer workflow is implemented.
+
+These are integration tasks, not rules silently marked as passing. No facilities subsystem,
+Observer notifications, or membership State implementation is added here.
+
+### Booking tests
+
+```sh
+uv run python -m unittest discover -s tests -v
+uv run ruff check .
+uv run ruff format --check .
+```
+
+The unit/API tests need no running services. Five service tests run only when
+`BFS_TEST_DATABASE_URL` points to an explicitly chosen disposable PostgreSQL database:
+
+```sh
+BFS_TEST_DATABASE_URL='postgresql+asyncpg://test_user:test_password@127.0.0.1:5432/bfs_test' \
+  uv run python -m unittest discover -s tests -v
+```
+
+Service tests create and remove a uniquely named schema. They never read the application's
+configured database URL. Use the project's locked Python/dependency versions for reproduction.

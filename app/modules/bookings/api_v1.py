@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, status
 from app.models.bookings import Booking
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.bookings.dependencies import BookingServiceDependency
+from app.modules.bookings.eligibility import BookingEligibilityError
 from app.modules.bookings.schemas import BookingResponse, CreateBookingRequest, WaitlistResponse
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
@@ -31,6 +32,11 @@ async def create_booking(
                 payload.starts_at,
             )
         )
+    except BookingEligibilityError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=[{"code": item.code, "message": item.message} for item in error.failures],
+        ) from error
     except ValueError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
