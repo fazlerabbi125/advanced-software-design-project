@@ -30,7 +30,6 @@ ZONE_STAY_MINUTES = {
 VIP_ROOM_CAPACITY = 8
 # A member who does not come back within this time loses their place on a VIP waiting list.
 VIP_WAITLIST_HOLD_MINUTES = 30
-CELERY_QUEUE_NAME = "bfs_gym"
 DEFAULT_PAGE_SIZE = 20
 HEALTH_CHECK_TIMEOUT_SECONDS = 5
 MAX_BIOMETRIC_IMAGE_BYTES = 5 * 1024 * 1024
