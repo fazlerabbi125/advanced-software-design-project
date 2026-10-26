@@ -6,7 +6,8 @@
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:8000/api/v1" },
     { "key": "accessToken", "value": "" },
-    { "key": "refreshToken", "value": "" }
+    { "key": "refreshToken", "value": "" },
+    { "key": "deviceKey", "value": "test-sauna-key" }
   ],
   "item": [
     {
@@ -80,6 +81,22 @@
             "body": { "mode": "raw", "raw": "{\n  \"plan_id\": 3\n}" },
             "url": "{{baseUrl}}/memberships/purchase"
           }
+        },
+        {
+          "name": "Renew my membership",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/memberships/me/renew"
+          }
+        },
+        {
+          "name": "Cancel my membership",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/memberships/me/cancel"
+          }
         }
       ]
     },
@@ -115,6 +132,48 @@
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\n  \"zone\": \"gym_floor\"\n}" },
             "url": "{{baseUrl}}/access/check-in"
+          }
+        },
+        {
+          "name": "Check out",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"zone\": \"vip_sauna\"\n}" },
+            "url": "{{baseUrl}}/access/check-out"
+          }
+        },
+        {
+          "name": "Face-scanner check-in (door device)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "X-Device-Key", "value": "{{deviceKey}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"member_id\": 3\n}" },
+            "url": "{{baseUrl}}/access/device-check-in"
+          }
+        },
+        {
+          "name": "My waiting-list position",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/access/waitlist/vip_sauna"
+          }
+        },
+        {
+          "name": "Leave waiting list",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/access/waitlist/vip_sauna"
+          }
+        },
+        {
+          "name": "Occupancy (staff)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/access/occupancy"
           }
         }
       ]

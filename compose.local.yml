@@ -8,6 +8,7 @@ services:
   cache-redis:
     <<: *environment
     image: redis:8.10.2-alpine3.23
+    # LRU eviction: occupancy sorted sets and VIP waiting lists expire naturally.
     command: redis-server --save "" --maxmemory ${CACHE_REDIS_MAXMEMORY} --maxmemory-policy allkeys-lru
     ports:
       - 127.0.0.1:${CACHE_REDIS_PORT}:6379
@@ -16,20 +17,3 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-
-  queue-redis:
-    <<: *environment
-    image: redis:8.10.2-alpine3.23
-    command: redis-server --appendonly yes --appendfsync everysec --maxmemory-policy noeviction
-    ports:
-      - 127.0.0.1:${QUEUE_REDIS_PORT}:6379
-    volumes:
-      - queue_redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-volumes:
-  queue_redis_data:

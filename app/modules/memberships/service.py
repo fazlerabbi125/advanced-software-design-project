@@ -58,7 +58,7 @@ class MembershipService:
     async def list_plans(self) -> list[MembershipPlan]:
         statement = (
             select(MembershipPlan)
-            .where(MembershipPlan.is_active.is_(True))
+            .where(MembershipPlan.is_active.is_(True), MembershipPlan.price_minor > 0)
             .options(selectinload(MembershipPlan.entitlements))
             .order_by(MembershipPlan.price_minor)
         )
@@ -68,9 +68,12 @@ class MembershipService:
         if self.payment_gateway is None:
             raise RuntimeError("MembershipService was created without a payment gateway")
 
+        # A plan without a price is not on sale, so it is treated as not found.
         plan = await self.session.scalar(
             select(MembershipPlan).where(
-                MembershipPlan.id == plan_id, MembershipPlan.is_active.is_(True)
+                MembershipPlan.id == plan_id,
+                MembershipPlan.is_active.is_(True),
+                MembershipPlan.price_minor > 0,
             )
         )
         if plan is None:
@@ -172,6 +175,20 @@ class MembershipService:
         # Lock this member's row until the transaction ends, so two changes to the
         # same member's membership run one after the other.
         await self.session.execute(select(User.id).where(User.id == user_id).with_for_update())
+    async def booking_membership(self, user_id: int, on_date: date) -> Membership | None:
+        """Load the current membership and its plan rules without lazy database access."""
+        return await self.session.scalar(
+            select(Membership)
+            .where(
+                Membership.user_id == user_id,
+                Membership.status == MembershipStatus.ACTIVE,
+                Membership.starts_on <= on_date,
+                Membership.ends_on >= on_date,
+            )
+            .options(selectinload(Membership.plan).selectinload(MembershipPlan.entitlements))
+            .order_by(Membership.ends_on.desc(), Membership.id.desc())
+            .limit(1)
+        )
 
     async def has_active_membership(self, user_id: int, on_date: date | None = None) -> bool:
         active_date = on_date or datetime.now(UTC).date()
