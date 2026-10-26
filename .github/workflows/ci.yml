@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Run Ruff Lint (major errors only)
+        # Fails only on major code errors (syntax errors, undefined variables, logic bugs).
+        # Ignores minor issues like unused imports (F401), unused variables (F841),
+        # import ordering (I), pyupgrade suggestions (UP), and formatting/whitespace (E, W).
+        run: uv run ruff check . --ignore F401,F841,I,UP,E,W
