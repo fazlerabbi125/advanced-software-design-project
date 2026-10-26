@@ -47,7 +47,7 @@ The business rules include membership plans with configurable booking windows an
 | **Chain of Responsibility (Vision)** | `PhotoValidationHandler` chain in `app/modules/members/` — checks resolution, illumination, blur, and face presence | 💡 Optional / Documented |
 | **Factory Method** | `PaymentGatewayFactory.create(settings)` in `app/modules/memberships/payment_gateway.py` — payment provider factory | ✅ Implemented |
 | **Observer** | `NotificationPublisher` + Redis Pub/Sub + SSE endpoint — business events push notifications | 🔧 In progress |
-| **State** | `ActiveState`, `ExpiredState`, `CancelledState` in `app/modules/memberships/states.py` — membership lifecycle | 🔧 In progress |
+| **State** | `ActiveState`, `ExpiredState`, `CancelledState` in `app/modules/memberships/states.py` — membership lifecycle | ✅ Implemented |
 | **Builder** | `BookingContextBuilder` in `app/modules/bookings/builder.py` — assembles complex `BookingContext` | 🔧 In progress |
 
 ## Architecture
@@ -131,7 +131,7 @@ uv run ruff format --check .
 | Chain of Responsibility pattern | `app/modules/bookings/eligibility.py` |
 | Factory Method pattern | `app/modules/memberships/payment_gateway.py` |
 | Observer pattern | `app/modules/notifications/` *(in progress)* |
-| State pattern | `app/modules/memberships/states.py` *(in progress)* |
+| State pattern | `app/modules/memberships/states.py` |
 | Builder pattern | `app/modules/bookings/builder.py` *(in progress)* |
 | Automated tests | `tests/` directory |
 | CI/CD | `.github/workflows/ci.yml` (Lint active) |
