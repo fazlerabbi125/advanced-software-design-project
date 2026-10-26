@@ -17,3 +17,14 @@ class AccessLogResponse(BaseModel):
     zone: str
     source: str
     occurred_at: datetime
+
+
+class DeviceCheckInRequest(BaseModel):
+    """Sent by a door scanner after it has recognised a member's face."""
+
+    member_id: int = Field(gt=0)
+
+
+class WaitlistPositionResponse(BaseModel):
+    zone: AccessZone
+    position: int | None

@@ -7,7 +7,6 @@ from pydantic_settings import BaseSettings
 from sqlalchemy import URL
 
 from app.utils.constants import (
-    CELERY_QUEUE_NAME,
     MAX_BIOMETRIC_IMAGE_BYTES,
     VIP_ROOM_CAPACITY,
 )
@@ -24,9 +23,6 @@ class Settings(BaseSettings):
     postgres_user: str
     postgres_password: SecretStr
     cache_redis_url: str
-    celery_broker_url: str
-    celery_result_backend: str
-    celery_default_queue: str = CELERY_QUEUE_NAME
     jwt_access_secret_key: SecretStr
     jwt_refresh_secret_key: SecretStr
     jwt_algorithm: str = "HS256"
@@ -38,6 +34,17 @@ class Settings(BaseSettings):
     upload_root: Path
     biometric_image_max_bytes: int = MAX_BIOMETRIC_IMAGE_BYTES
     vip_room_capacity: int = Field(default=VIP_ROOM_CAPACITY, gt=0)
+    # Secret key of each face-recognition door scanner, mapped to the zone its door opens.
+    scanner_device_keys: dict[str, str] = Field(default_factory=dict)
+
+    # --- Stripe payment settings ---
+    # Use Stripe test keys (sk_test_...) for local development and demos.
+    # Production keys must never be committed to the repository.
+    stripe_secret_key: SecretStr
+    stripe_webhook_secret: SecretStr
+    # URLs Stripe redirects the member to after checkout completes or is abandoned.
+    stripe_success_url: str = "http://localhost:8000/docs#/memberships/purchase_membership"
+    stripe_cancel_url: str = "http://localhost:8000/docs#/memberships/purchase_membership"
 
     @property
     def sqlalchemy_url(self) -> URL:

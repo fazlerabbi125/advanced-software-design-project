@@ -8,7 +8,7 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.database import close_engine, is_database_available
 from app.core.exceptions import install_exception_handlers
-from app.core.redis import close_redis_client, is_cache_redis_available, is_redis_url_available
+from app.core.redis import close_redis_client, is_cache_redis_available
 from app.utils.constants import HEALTH_CHECK_TIMEOUT_SECONDS
 
 settings = get_settings()
@@ -37,18 +37,18 @@ app.include_router(api_router)
 
 @app.get("/health", tags=["health"])
 async def health_check() -> dict[str, str]:
+    """Returns 200 when both PostgreSQL and Redis are reachable."""
     try:
-        database_available, cache_redis_available, queue_redis_available = await wait_for(
+        database_available, cache_redis_available = await wait_for(
             gather(
                 is_database_available(),
                 is_cache_redis_available(),
-                is_redis_url_available(settings.celery_broker_url),
             ),
             timeout=HEALTH_CHECK_TIMEOUT_SECONDS,
         )
     except TimeoutError:
-        database_available = cache_redis_available = queue_redis_available = False
-    if not all((database_available, cache_redis_available, queue_redis_available)):
+        database_available = cache_redis_available = False
+    if not all((database_available, cache_redis_available)):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Required dependency unavailable",
