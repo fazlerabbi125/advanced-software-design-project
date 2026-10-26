@@ -1,21 +1,21 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.models.bookings import BookingResourceType
 
 
 class CreateBookingRequest(BaseModel):
-    resource_name: str = Field(min_length=1, max_length=150)
-    resource_type: BookingResourceType
-    starts_at: datetime
+    session_id: int
 
 
 class BookingResponse(BaseModel):
     id: int
+    session_id: int | None
     resource_name: str
     resource_type: BookingResourceType
     starts_at: datetime
+    ends_at: datetime | None
     status: str
 
 

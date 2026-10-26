@@ -11,11 +11,14 @@ from app.models.base import Base, IdMixin, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.auth import User
+    from app.models.sessions import TimetableSession
 
 
 class BookingStatus(StrEnum):
     CONFIRMED = "confirmed"
     CANCELLED = "cancelled"
+    CHECKED_IN = "checked_in"
+    NO_SHOW = "no_show"
 
 
 class BookingResourceType(StrEnum):
@@ -46,20 +49,31 @@ class Booking(Base, IdMixin, TimestampMixin):
         )
     )
     starts_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), index=True)
+    ends_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    session_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("sessions.id", ondelete="RESTRICT"), index=True
+    )
     status: Mapped[BookingStatus] = mapped_column(
         sa.Enum(BookingStatus, name="booking_status", native_enum=False, create_constraint=True),
         default=BookingStatus.CONFIRMED,
     )
     user: Mapped[User] = relationship(back_populates="bookings")
+    session: Mapped[TimetableSession | None] = relationship(back_populates="bookings")
     waitlist_entries: Mapped[list[WaitlistEntry]] = relationship(back_populates="booking")
 
 
 class WaitlistEntry(Base, IdMixin, TimestampMixin):
     __tablename__ = "waitlist_entries"
-    __table_args__ = (sa.UniqueConstraint("booking_id", "user_id"),)
+    __table_args__ = (
+        sa.UniqueConstraint("booking_id", "user_id"),
+        sa.UniqueConstraint("session_id", "user_id"),
+    )
 
-    booking_id: Mapped[int] = mapped_column(
+    booking_id: Mapped[int | None] = mapped_column(
         sa.ForeignKey("bookings.id", ondelete="RESTRICT"), index=True
+    )
+    session_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("sessions.id", ondelete="RESTRICT"), index=True
     )
     user_id: Mapped[int] = mapped_column(sa.ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     status: Mapped[WaitlistStatus] = mapped_column(
@@ -67,4 +81,5 @@ class WaitlistEntry(Base, IdMixin, TimestampMixin):
         default=WaitlistStatus.WAITING,
     )
     offered_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
-    booking: Mapped[Booking] = relationship(back_populates="waitlist_entries")
+    booking: Mapped[Booking | None] = relationship(back_populates="waitlist_entries")
+    session: Mapped[TimetableSession | None] = relationship(back_populates="waitlist_entries")

@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.models.bookings import Booking, BookingResourceType, BookingStatus
 from app.models.memberships import Membership, MembershipEntitlement, MembershipStatus
+from app.utils.constants import NO_SHOW_PENALTY_DAYS, NO_SHOW_PENALTY_LIMIT
 
 REQUIRED_ENTITLEMENTS = {
     BookingResourceType.CLASS: MembershipEntitlement.CLASS_BOOKING,
@@ -40,6 +41,7 @@ class BookingContext:
     resource_type: BookingResourceType
     membership: Membership | None
     bookings: Sequence[Booking]
+    has_unresolved_no_shows: bool = False
 
 
 def week_bounds(starts_at: datetime) -> tuple[datetime, datetime]:
@@ -115,7 +117,7 @@ class WeeklyLimitRule(EligibilityRule):
             return None
         start, end = week_bounds(context.starts_at)
         count = sum(
-            booking.status == BookingStatus.CONFIRMED and start <= booking.starts_at < end
+            booking.status != BookingStatus.CANCELLED and start <= booking.starts_at < end
             for booking in context.bookings
         )
         limit = context.membership.plan.weekly_booking_limit
@@ -126,12 +128,23 @@ class WeeklyLimitRule(EligibilityRule):
 
 class SameStartRule(EligibilityRule):
     def check(self, context: BookingContext) -> EligibilityFailure | None:
-        # There is no end time in the current model. Do not invent a session duration.
+        # Checked-in and no-show bookings still used the slot, so only cancelled ones are free.
         if any(
-            booking.status == BookingStatus.CONFIRMED and booking.starts_at == context.starts_at
+            booking.status != BookingStatus.CANCELLED and booking.starts_at == context.starts_at
             for booking in context.bookings
         ):
             return EligibilityFailure("time_conflict", "you already have a booking at this time")
+        return None
+
+
+class NoShowPenaltyRule(EligibilityRule):
+    def check(self, context: BookingContext) -> EligibilityFailure | None:
+        if context.has_unresolved_no_shows:
+            return EligibilityFailure(
+                "no_show_penalty",
+                f"bookings are paused after {NO_SHOW_PENALTY_LIMIT} missed sessions "
+                f"in the last {NO_SHOW_PENALTY_DAYS} days",
+            )
         return None
 
 
@@ -142,6 +155,7 @@ DEFAULT_RULES = (
     BookingWindowRule,
     WeeklyLimitRule,
     SameStartRule,
+    NoShowPenaltyRule,
 )
 
 
