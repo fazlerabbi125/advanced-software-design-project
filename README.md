@@ -1,128 +1,140 @@
-## BFS Gym API
+# BFS Gym API
 
-### Local development
+BFS Gym is a membership and facility-access management API built for the CS6451 Advanced Software Design group project. The gym offers a gym floor, swimming pool, fitness classes, personal training sessions, and VIP wellness rooms (sauna, massage, and cold plunge).
 
-Use your local PostgreSQL instance and pgAdmin. Create a PostgreSQL database and role matching `.env`, then copy `.env.example` to `.env` and replace the placeholder secrets.
+This repository is a proof-of-concept monolithic REST API. It demonstrates object-oriented analysis and design, domain business rules, architectural patterns, and automated testing. It is not a complete production gym-management system.
+
+## Gym Background
+
+BFS Gym serves three tiers of members:
+
+- **Standard members** access the gym floor and can book fitness classes.
+- **Premium members** additionally access the swimming pool, personal training, and the VIP wellness suites.
+- All members are identified at entry doors by a biometric scanner that compares their live face against their enrolled photo.
+
+The business rules include membership plans with configurable booking windows and weekly limits, VIP room capacity enforcement with automatic waiting lists, booking eligibility checks before any reservation is accepted, and automated notifications when significant events occur.
+
+## User Roles
+
+| Role | What they can do |
+|---|---|
+| **Member** | Register, purchase/renew/cancel membership, book eligible activities, check in to sessions, receive in-app notifications |
+| **Staff** | Everything a member can do, plus manually check in a member and view live zone occupancy |
+| **Manager** | Everything staff can do, plus create and configure membership plans and view business reports |
+| **Biometric scanner** | A trusted hardware device (identified by a secret device key) that submits check-in requests after a face-match |
+
+## Implemented Features
+
+- JWT authentication (access + refresh tokens) with member, staff, and manager roles.
+- Membership plans (Basic, Standard, Premium) with entitlement-based access control.
+- Stripe Checkout payment integration (sandbox mode) with webhook-based membership activation.
+- Booking creation, listing, cancellation, and eligibility feedback (active membership, plan entitlement, booking window, weekly limit, same-start conflict checks).
+- VIP occupancy tracking, automatic waiting lists, and visit expiry using Redis sorted sets.
+- Scanner/device check-in with configurable device keys and zone-specific access policies.
+- Member biometric photo upload for enrolment reference.
+- In-app notification model with Redis Pub/Sub delivery and SSE streaming *(in progress)*.
+- **Optional AI Integrations**:
+  - **Feature A (Pydantic AI)**: Intelligent workout and class recommender using the Strategy pattern.
+  - **Feature C (Computer Vision)**: Biometric photo quality validation using the Chain of Responsibility pattern.
+
+## Design Patterns
+
+| Pattern | Where it is used | Status |
+|---|---|---|
+| **Strategy** | `GymFloorPolicy` and `VipAreaPolicy` in `app/modules/access/policies.py` — zone access policies | ✅ Implemented |
+| **Strategy (AI Extension)** | `RecommendationStrategy` (`PydanticAIStrategy`, `PopularityStrategy`) for class recommendations | 💡 Optional / Documented |
+| **Chain of Responsibility** | Booking eligibility rules in `app/modules/bookings/eligibility.py` — collect all validation failures | ✅ Implemented |
+| **Chain of Responsibility (Vision)** | `PhotoValidationHandler` chain in `app/modules/members/` — checks resolution, illumination, blur, and face presence | 💡 Optional / Documented |
+| **Factory Method** | `PaymentGatewayFactory.create(settings)` in `app/modules/memberships/payment_gateway.py` — payment provider factory | ✅ Implemented |
+| **Observer** | `NotificationPublisher` + Redis Pub/Sub + SSE endpoint — business events push notifications | 🔧 In progress |
+| **State** | `ActiveState`, `ExpiredState`, `CancelledState` in `app/modules/memberships/states.py` — membership lifecycle | 🔧 In progress |
+| **Builder** | `BookingContextBuilder` in `app/modules/bookings/builder.py` — assembles complex `BookingContext` | 🔧 In progress |
+
+## Architecture
+
+The project follows a **monolithic MVC/REST architecture**:
+
+- **Models** (`app/models/`) — SQLAlchemy ORM models define the database schema.
+- **Services** (`app/modules/*/service.py`) — contain all business logic; routers never query the database directly.
+- **Routers/Controllers** (`app/modules/*/api_v1.py`) — FastAPI route handlers that validate requests, call services, and return responses.
+
+## Why No External Cloud AI for Door Scanners
+
+The biometric scanner feature uses **offline face comparison** (a local Python library, no external API key). Real gym door scanners have embedded face-recognition chips. Our API trusts the scanner's result (device key + template ID + confidence score) and enforces the business rules — it does not need to replicate face recognition in an external AI service.
+
+Application-level AI extensions (such as **Pydantic AI** for workout recommendations and **OpenCV** for enrolment photo quality checks) are designed as decoupled, pluggable strategies with deterministic fallbacks to preserve system reliability and testability. See [Implementation Guide](docs/implementation-guide.md#optional-ai-features) for full code examples.
+
+## Why No Celery
+
+Celery was originally added as a notification queue placeholder, but it is not needed:
+
+- **Stripe webhooks** are processed synchronously inside the FastAPI webhook endpoint — no background queue is needed.
+- **In-app notifications** are delivered via Redis Pub/Sub + Server-Sent Events (SSE) — this is instant push delivery; a queue would only add latency.
+- **Periodic background jobs** (waitlist expiry, no-show detection) are handled by APScheduler, which runs inside the FastAPI process with no extra Docker service or infrastructure.
+
+Removing Celery simplifies the stack from three services (API + Celery worker + queue-Redis) to one (API), while the Redis container that already exists for VIP occupancy is reused for Pub/Sub.
+
+## Local Development
+
+Copy `.env.example` to `.env` and replace placeholder values. You will need a Stripe test account — get a test secret key from [https://dashboard.stripe.com/test/apikeys](https://dashboard.stripe.com/test/apikeys).
+
+Start a local PostgreSQL instance (or use any existing one) and a local Redis container:
 
 ```powershell
 uv sync --all-groups
 docker compose -f compose.local.yml --env-file .env up -d
 uv run --env-file .env alembic upgrade head
-uv run --env-file .env -m app.main or uv run --env-file .env fastapi dev app/main.py
+uv run --env-file .env fastapi dev app/main.py
 ```
 
-Start the optional local worker in another terminal:
+## Full Docker Setup
 
-```powershell
-uv run --env-file .env celery --app=app.queue.celery_app:celery_app worker --pool=solo --loglevel=INFO --queues=bfs_gym
-```
-
-### Complete Docker setup
-
-Copy `.env.docker.example` to `.env.docker`, replace the placeholder secrets, then run:
+Copy `.env.docker.example` to `.env.docker` and replace placeholder secrets, then start the full stack:
 
 ```powershell
 docker compose --env-file .env.docker up --build
 ```
 
-The `migrate` service applies the current schema before the API starts. After creating a new migration, run it with:
+The `migrate` service applies the schema before the API starts. Swagger is available at `http://localhost:8000/docs`; pgAdmin at `http://localhost:5050`.
+
+### Enable Stripe webhook forwarding
+
+To test payments locally, start the Stripe CLI sidecar:
+
+```powershell
+docker compose --env-file .env.docker --profile stripe up
+```
+
+After it starts, copy the `whsec_...` signing secret from the `stripe-listener` container logs into `STRIPE_WEBHOOK_SECRET` in `.env.docker`, then restart the `api` service.
+
+To apply a new migration:
 
 ```powershell
 docker compose --env-file .env.docker run --rm migrate
 ```
 
-Swagger is available at `http://localhost:8000/docs` and pgAdmin at `http://localhost:5050` in the complete Docker setup.
-
-The cache Redis instance is exposed on port `6379`, is bounded by `CACHE_REDIS_MAXMEMORY`, and uses LRU eviction without persistence. The Celery broker/result Redis instance is exposed on port `6380`, uses AOF with one-second fsync, and rejects writes rather than evicting queued work.
-
-Dependencies are declared in `pyproject.toml` and locked in `uv.lock`. Run `uv run ruff format --check .` and `uv run ruff check .` before committing changes.
-
-## Membership tiers
-
-- Basic: Gym Floor access.
-- Standard: Basic benefits plus class and pool booking.
-- Premium: Standard benefits plus refreshments, personal training, training plans, and VIP sauna, massage, and cold-plunge access.
-
-## Membership prices
-
-Plans are priced in cent and last 30 days: Basic EUR 30, Standard EUR 45, Premium EUR 70. List them with `GET /api/v1/memberships/plans` and buy one with `POST /api/v1/memberships/purchase` (payments use the mock gateway, which approves every charge).
-
-## VIP rooms and occupancy
-
-Each VIP room (sauna, massage, cold plunge) holds at most `VIP_ROOM_CAPACITY` people at once (default 8); a check-in to a full room returns 409. A visit counts towards a zone for a fixed time (sauna 30 min, massage 60, cold plunge 15, gym floor 180), after which the member is counted out automatically; checking out earlier frees the place straight away. Staff and managers can see the live counts with `GET /api/v1/access/occupancy`.
-
-When a VIP room is full, the member is put on that room's waiting list and the 409 response tells them their position. Places that free up go to the front of the list first, so nobody can jump the queue; a member who does not come back within 30 minutes loses their place. Members can check their position with `GET /api/v1/access/waitlist/{zone}` and leave with `DELETE /api/v1/access/waitlist/{zone}`.
-
-## Face-recognition door scanners
-
-Face matching happens on the scanner, not in this API. When a scanner recognises a member it calls `POST /api/v1/access/device-check-in` with `{"member_id": 3}` and its secret key in the `X-Device-Key` header. Each key is mapped to the zone its door opens in `SCANNER_DEVICE_KEYS`, for example `SCANNER_DEVICE_KEYS='{"a-long-random-key": "vip_sauna"}'`. The usual entry rules apply, and the entry is logged with `source: face_recognition`.
-
-## Staff and manager accounts
-
-Members register through the API. Create a staff or manager account, or change an existing user's role, with:
+## Verification
 
 ```powershell
-docker compose --env-file .env.docker exec api python -m app.scripts.create_user --email staff@bfs-gym.local --password "a-long-password" --role staff
-```
-
-## Booking eligibility (Chain of Responsibility)
-
-`BookingService.create` loads the current membership, plan and requested week's bookings,
-then passes a `BookingContext` through the handlers in
-`app/modules/bookings/eligibility.py`. Every handler forwards to its successor even when
-it fails. Rejections return HTTP 422 with a `detail` array of `{code, message}` entries.
-Invalid request data (including a missing timezone) retains the normal validation response.
-
-The chain checks future start time, active membership covering the session, plan entitlement,
-booking window, weekly limit, and another confirmed booking at the same instant. Missing
-membership is reported once; checks needing an unknown plan are not evaluated. Limits are
-stored on `membership_plans`: Basic 2 days / 3 bookings, Standard 3 / 5, Premium 7 / 10.
-Run `alembic upgrade head` before using the change. Custom plans default to Basic limits;
-set their database values explicitly as needed. There is not yet a manager configuration API.
-Windows are rolling 24-hour days, inclusive at the boundary. Weeks and membership dates use
-UTC; weekly counts use the requested session's Monday–Sunday week, excluding cancellations.
-
-A user-row lock covers membership lookup, eligibility checks and insertion. This prevents
-parallel requests by the same member from exceeding the weekly limit. Cancelling and
-rebooking an identical slot reuses the cancelled row because the existing unique constraint
-also covers cancelled rows. The API request shape is unchanged.
-
-To add a rule, implement `EligibilityRule.check` and register the class in `DEFAULT_RULES`.
-Keep database reads and writes in the service; handlers consume the loaded context.
-
-### Remaining report requirements
-
-The current model has only confirmed/cancelled bookings, a resource name/type and a start
-time. This implementation does **not** claim full report compliance:
-
-- Full interval conflicts need authoritative session end times. Replace `SameStartRule`
-  when those exist and load bookings overlapping the interval, including the previous week.
-- Shared capacity and unit allocation need a timetable/session record and station/lane
-  inventory. Check and allocate under a session-row lock in the booking transaction;
-  the user-row lock does not protect capacity between different members.
-- Equipment daily caps need equipment types and equipment bookings (currently unsupported).
-- Suspension needs persisted suspension dates or an agreed no-show history mechanism.
-- Once checked-in/no-show statuses exist, include them in the weekly count. Reuse the chain
-  for waitlist acceptance when the session-based waitlist/offer workflow is implemented.
-
-These are integration tasks, not rules silently marked as passing. No facilities subsystem,
-Observer notifications, or membership State implementation is added here.
-
-### Booking tests
-
-```sh
 uv run python -m unittest discover -s tests -v
 uv run ruff check .
 uv run ruff format --check .
 ```
 
-The unit/API tests need no running services. Five service tests run only when
-`BFS_TEST_DATABASE_URL` points to an explicitly chosen disposable PostgreSQL database:
+## Assignment Mapping
 
-```sh
-BFS_TEST_DATABASE_URL='postgresql+asyncpg://test_user:test_password@127.0.0.1:5432/bfs_test' \
-  uv run python -m unittest discover -s tests -v
-```
-
-Service tests create and remove a uniquely named schema. They never read the application's
-configured database URL. Use the project's locked Python/dependency versions for reproduction.
+| Rubric Item | Evidence location |
+|---|---|
+| Scenario narrative | Report section 1 |
+| Use-case diagrams | Report section 3, UML artefacts |
+| Strategy pattern | `app/modules/access/policies.py` |
+| Chain of Responsibility pattern | `app/modules/bookings/eligibility.py` |
+| Factory Method pattern | `app/modules/memberships/payment_gateway.py` |
+| Observer pattern | `app/modules/notifications/` *(in progress)* |
+| State pattern | `app/modules/memberships/states.py` *(in progress)* |
+| Builder pattern | `app/modules/bookings/builder.py` *(in progress)* |
+| Automated tests | `tests/` directory |
+| CI/CD | `.github/workflows/ci.yml` (Lint active) |
+| Metrics + refactoring | Report added-value section *(planned)* |
+| AI Strategy extension (Feature A) | `docs/implementation-guide.md#optional-ai-features` *(Pydantic AI recommender)* |
+| AI Chain of Responsibility (Feature C) | `docs/implementation-guide.md#optional-ai-features` *(OpenCV photo quality check)* |
