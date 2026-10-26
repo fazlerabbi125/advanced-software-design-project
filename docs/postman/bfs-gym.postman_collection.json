@@ -7,7 +7,9 @@
     { "key": "baseUrl", "value": "http://localhost:8000/api/v1" },
     { "key": "accessToken", "value": "" },
     { "key": "refreshToken", "value": "" },
-    { "key": "deviceKey", "value": "test-sauna-key" }
+    { "key": "deviceKey", "value": "test-sauna-key" },
+    { "key": "sessionId", "value": "1" },
+    { "key": "bookingId", "value": "1" }
   ],
   "item": [
     {
@@ -101,6 +103,28 @@
       ]
     },
     {
+      "name": "Timetable sessions",
+      "item": [
+        {
+          "name": "Create session (staff or manager)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resource_name\": \"Spin class\",\n  \"resource_type\": \"class\",\n  \"starts_at\": \"2026-11-02T18:00:00Z\",\n  \"ends_at\": \"2026-11-02T18:45:00Z\",\n  \"capacity\": 12\n}" },
+            "url": "{{baseUrl}}/sessions"
+          }
+        },
+        {
+          "name": "Upcoming sessions",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/sessions"
+          }
+        }
+      ]
+    },
+    {
       "name": "Bookings",
       "item": [
         {
@@ -108,8 +132,16 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"resource_name\": \"Pool lane 1\",\n  \"resource_type\": \"pool\",\n  \"starts_at\": \"2026-11-01T10:00:00Z\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"session_id\": {{sessionId}}\n}" },
             "url": "{{baseUrl}}/bookings"
+          }
+        },
+        {
+          "name": "Check in to booking",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/bookings/{{bookingId}}/check-in"
           }
         },
         {
