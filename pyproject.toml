@@ -16,6 +16,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.1.4",
     "stripe>=12.0.0",
     "uvicorn>=0.54.0",
+    "opencv-python-headless>=5.0.0.93",
 ]
 
 [dependency-groups]
