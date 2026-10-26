@@ -30,6 +30,12 @@ ZONE_STAY_MINUTES = {
 VIP_ROOM_CAPACITY = 8
 # A member who does not come back within this time loses their place on a VIP waiting list.
 VIP_WAITLIST_HOLD_MINUTES = 30
+# Upper limits for manager-configured plans. Larger values overflow date arithmetic in
+# booking and renewal (e.g. now + timedelta(days=...)), or are clearly typos.
+MAX_PLAN_PRICE_MINOR = 1_000_000  # EUR 10,000
+MAX_PLAN_DURATION_DAYS = 3650
+MAX_BOOKING_WINDOW_DAYS = 365
+MAX_WEEKLY_BOOKING_LIMIT = 1000
 DEFAULT_PAGE_SIZE = 20
 HEALTH_CHECK_TIMEOUT_SECONDS = 5
 MAX_BIOMETRIC_IMAGE_BYTES = 5 * 1024 * 1024

@@ -8,7 +8,29 @@ from fastapi.testclient import TestClient
 from app.models.auth import User, UserRole
 from app.models.memberships import MembershipEntitlement, MembershipPlan, PlanEntitlement
 from app.modules.memberships.service import PlanNameTakenError, PlanNotFoundError
+from app.utils.constants import (
+    MAX_BOOKING_WINDOW_DAYS,
+    MAX_PLAN_DURATION_DAYS,
+    MAX_PLAN_PRICE_MINOR,
+    MAX_WEEKLY_BOOKING_LIMIT,
+)
 from tests.settings import TEST_ENVIRONMENT
+
+# Values that would break booking or purchase (date overflow) or make an unsellable plan.
+INVALID_CHANGES = (
+    {"price_minor": 0},
+    {"price_minor": MAX_PLAN_PRICE_MINOR + 1},
+    {"duration_days": 0},
+    {"duration_days": MAX_PLAN_DURATION_DAYS + 1},
+    {"booking_window_days": -1},
+    {"booking_window_days": MAX_BOOKING_WINDOW_DAYS + 1},
+    {"booking_window_days": 3_000_000},
+    {"weekly_booking_limit": -1},
+    {"weekly_booking_limit": MAX_WEEKLY_BOOKING_LIMIT + 1},
+    {"currency": "EURO"},
+    {"currency": "XYZ"},
+    {"entitlements": ["free_coffee"]},
+)
 
 NEW_PLAN = {
     "name": "  Student  ",
@@ -92,19 +114,34 @@ class PlanManagementApiTests(unittest.TestCase):
         self.service.deactivate_plan.assert_not_awaited()
 
     def test_invalid_plans_are_rejected(self):
-        invalid = (
-            {"price_minor": 0},
-            {"weekly_booking_limit": -1},
-            {"currency": "EURO"},
-            {"entitlements": []},
-            {"entitlements": ["free_coffee"]},
-            {"name": "   "},
-        )
-        for change in invalid:
+        for change in INVALID_CHANGES + ({"entitlements": []}, {"name": "   "}):
             with self.subTest(change=change):
                 response = self.client.post("/memberships/plans", json=NEW_PLAN | change)
                 self.assertEqual(response.status_code, 422)
         self.service.create_plan.assert_not_awaited()
+
+    def test_invalid_updates_are_rejected(self):
+        for change in INVALID_CHANGES:
+            with self.subTest(change=change):
+                response = self.client.patch("/memberships/plans/4", json=change)
+                self.assertEqual(response.status_code, 422)
+        self.service.update_plan.assert_not_awaited()
+
+    def test_limits_are_inclusive_and_currency_is_normalised(self):
+        at_limits = {
+            "price_minor": MAX_PLAN_PRICE_MINOR,
+            "duration_days": MAX_PLAN_DURATION_DAYS,
+            "booking_window_days": MAX_BOOKING_WINDOW_DAYS,
+            "weekly_booking_limit": MAX_WEEKLY_BOOKING_LIMIT,
+            "currency": " gbp ",
+        }
+
+        response = self.client.post("/memberships/plans", json=NEW_PLAN | at_limits)
+
+        self.assertEqual(response.status_code, 201)
+        sent = self.service.create_plan.await_args.kwargs
+        self.assertEqual(sent["currency"], "GBP")
+        self.assertEqual(sent["booking_window_days"], MAX_BOOKING_WINDOW_DAYS)
 
     def test_duplicate_name_is_a_conflict(self):
         self.service.create_plan.side_effect = PlanNameTakenError("taken")
