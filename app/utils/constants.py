@@ -43,3 +43,7 @@ MAX_PAGE_SIZE = 100
 MIN_PASSWORD_LENGTH = 12
 ALLOWED_BIOMETRIC_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 BIOMETRIC_UPLOAD_CHUNK_BYTES = 1024 * 1024
+# Members who miss this many booked sessions in the window cannot book again until
+# the oldest no-show falls outside the window.
+NO_SHOW_PENALTY_LIMIT = 3
+NO_SHOW_PENALTY_DAYS = 30

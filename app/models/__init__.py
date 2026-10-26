@@ -16,6 +16,7 @@ from app.models.memberships import (
     MembershipStatus,
     PlanEntitlement,
 )
+from app.models.sessions import TimetableSession
 
 __all__ = [
     "AccessEvent",
@@ -32,6 +33,7 @@ __all__ = [
     "MembershipStatus",
     "PlanEntitlement",
     "RefreshToken",
+    "TimetableSession",
     "IdMixin",
     "TimestampMixin",
     "User",

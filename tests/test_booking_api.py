@@ -30,11 +30,7 @@ class BookingApiTests(unittest.TestCase):
         with TestClient(app) as client:
             response = client.post(
                 "/bookings",
-                json={
-                    "resource_name": "Class",
-                    "resource_type": "class",
-                    "starts_at": "2026-10-20T12:00:00Z",
-                },
+                json={"session_id": 1},
             )
         self.assertEqual(response.status_code, 422)
         self.assertEqual(
