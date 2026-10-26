@@ -20,6 +20,7 @@ from app.models import (
     MembershipEntitlement,
     MembershipStatus,
     PlanEntitlement,
+    TimetableSession,
     User,
 )
 from app.modules.bookings.eligibility import BookingEligibilityError
@@ -151,13 +152,18 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
             user_id = user.id
 
         async def book(resource_type, days_ahead, minutes=0):
+            starts_at = NOW + timedelta(days=days_ahead, minutes=minutes)
             async with self.sessions() as session:
-                return await BookingService(session).create(
-                    user_id,
-                    "Session",
-                    resource_type,
-                    NOW + timedelta(days=days_ahead, minutes=minutes),
+                timetable_session = TimetableSession(
+                    resource_name="Session",
+                    resource_type=resource_type,
+                    starts_at=starts_at,
+                    ends_at=starts_at + timedelta(minutes=45),
+                    capacity=10,
                 )
+                session.add(timetable_session)
+                await session.commit()
+                return await BookingService(session).create(user_id, timetable_session.id)
 
         with patch("app.modules.bookings.service.utc_now", return_value=NOW):
             await book(BookingResourceType.CLASS, days_ahead=0, minutes=60)
