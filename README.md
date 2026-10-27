@@ -258,5 +258,4 @@ uv run ruff format --check .
 | Automated tests | `tests/` directory (Unit, Integration, and DB tests) |
 | CI/CD | `.github/workflows/ci.yml` (Lint, DB Integration Tests, Metrics) |
 | Metrics + refactoring | `BookingService.create` refactored (complexity 10 -> 2), Radon CI job |
-| AI Strategy extension (Feature A) | `docs/implementation-guide.md#optional-ai-features` *(Pydantic AI recommender)* |
-| AI Chain of Responsibility (Feature C) | `docs/implementation-guide.md#optional-ai-features` *(OpenCV photo quality check)* |
+| AI Chain of Responsibility (Feature A) | `docs/implementation-guide.md#optional-ai-features` *(OpenCV photo quality check)* |

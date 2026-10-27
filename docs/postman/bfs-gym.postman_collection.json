@@ -9,7 +9,8 @@
     { "key": "refreshToken", "value": "" },
     { "key": "deviceKey", "value": "test-sauna-key" },
     { "key": "sessionId", "value": "1" },
-    { "key": "bookingId", "value": "1" }
+    { "key": "bookingId", "value": "1" },
+    { "key": "waitlistEntryId", "value": "1" }
   ],
   "item": [
     {
@@ -145,6 +146,22 @@
           }
         },
         {
+          "name": "My waiting lists and offers",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/bookings/waitlist/me"
+          }
+        },
+        {
+          "name": "Accept waitlist offer",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/bookings/waitlist/{{waitlistEntryId}}/accept"
+          }
+        },
+        {
           "name": "My bookings",
           "request": {
             "method": "GET",
@@ -164,6 +181,15 @@
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\n  \"zone\": \"gym_floor\"\n}" },
             "url": "{{baseUrl}}/access/check-in"
+          }
+        },
+        {
+          "name": "Manual check-in (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"member_id\": 1,\n  \"zone\": \"gym_floor\",\n  \"reason\": \"Scanner offline, photo ID checked\"\n}" },
+            "url": "{{baseUrl}}/access/manual-check-in"
           }
         },
         {
@@ -206,6 +232,45 @@
             "method": "GET",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
             "url": "{{baseUrl}}/access/occupancy"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Manager",
+      "item": [
+        {
+          "name": "All plans, including off sale",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/memberships/plans/all"
+          }
+        },
+        {
+          "name": "Create plan",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Student\",\n  \"price_minor\": 2500,\n  \"currency\": \"EUR\",\n  \"duration_days\": 30,\n  \"booking_window_days\": 2,\n  \"weekly_booking_limit\": 4,\n  \"entitlements\": [\"gym_floor_access\", \"class_booking\"]\n}" },
+            "url": "{{baseUrl}}/memberships/plans"
+          }
+        },
+        {
+          "name": "Update plan",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"weekly_booking_limit\": 6,\n  \"entitlements\": [\"gym_floor_access\", \"class_booking\", \"pool_booking\"]\n}" },
+            "url": "{{baseUrl}}/memberships/plans/4"
+          }
+        },
+        {
+          "name": "Take plan off sale",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/memberships/plans/4"
           }
         }
       ]

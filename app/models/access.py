@@ -45,5 +45,10 @@ class AccessLog(IdMixin, TimestampMixin, Base):
     zone: Mapped[str] = mapped_column(String(150), default=AccessZone.GYM_FLOOR.value)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     source: Mapped[str] = mapped_column(String(50), default="biometric")
+    # Set only for manual check-ins: the staff member who let the member in, and why.
+    performed_by_staff_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    staff_reason: Mapped[str | None] = mapped_column(String(255))
 
-    user: Mapped[User] = relationship(back_populates="access_logs")
+    user: Mapped[User] = relationship(back_populates="access_logs", foreign_keys=[member_id])

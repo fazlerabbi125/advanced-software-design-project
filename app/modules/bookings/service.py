@@ -1,11 +1,19 @@
 from collections.abc import Sequence
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.auth import User
-from app.models.bookings import Booking, BookingStatus, WaitlistEntry, WaitlistStatus
+from app.models.bookings import (
+    Booking,
+    BookingResourceType,
+    BookingStatus,
+    WaitlistEntry,
+    WaitlistStatus,
+)
 from app.models.timetable_sessions import TimetableSession
 from app.modules.bookings.builder import BookingContextBuilder
 from app.modules.bookings.eligibility import (
@@ -14,6 +22,11 @@ from app.modules.bookings.eligibility import (
     build_eligibility_chain,
 )
 from app.modules.memberships.service import MembershipService
+from app.shared.constants import (
+    CHECK_IN_GRACE_MINUTES,
+    POOL_OFFER_CUTOFF_MINUTES,
+    WAITLIST_OFFER_MINUTES,
+)
 from app.shared.helpers import utc_now
 
 
@@ -29,12 +42,34 @@ class BookingStateError(ValueError):
     pass
 
 
+class WaitlistEntryNotFoundError(LookupError):
+    pass
+
+
 class SessionFullError(Exception):
     """The session has no free places; the member was put on its waiting list."""
 
     def __init__(self, position: int) -> None:
         self.position = position
         super().__init__(f"this session is full, you are number {position} on the waiting list")
+
+
+def offer_deadline(offered_at: datetime, timetable_session: TimetableSession) -> datetime:
+    """When a waitlist offer made at offered_at stops being open."""
+    if timetable_session.resource_type == BookingResourceType.POOL:
+        latest = timetable_session.ends_at - timedelta(minutes=POOL_OFFER_CUTOFF_MINUTES)
+    else:
+        latest = timetable_session.starts_at
+    return min(offered_at + timedelta(minutes=WAITLIST_OFFER_MINUTES), latest)
+
+
+def check_in_deadline(booking: Booking) -> datetime:
+    """When a confirmed booking that has not been checked in becomes a no-show."""
+    # A booking made after the start still gets the full grace period from when it was made.
+    deadline = max(booking.starts_at, booking.created_at) + timedelta(
+        minutes=CHECK_IN_GRACE_MINUTES
+    )
+    return min(deadline, booking.ends_at) if booking.ends_at is not None else deadline
 
 
 def _same_slot(bookings: Sequence[Booking], timetable_session: TimetableSession) -> Booking | None:
@@ -126,6 +161,100 @@ class BookingService:
         booking.status = BookingStatus.CONFIRMED
         timetable_session.allocated_count += 1
 
+    async def release_places(
+        self, timetable_session: TimetableSession, count: int, now: datetime
+    ) -> None:
+        """Give back places on a locked session and offer each to the next waiting member.
+
+        The caller commits. An offered place stays allocated, so it is held for that
+        member until they accept it or the offer expires.
+        """
+        timetable_session.allocated_count = max(timetable_session.allocated_count - count, 0)
+        for _ in range(count):
+            if await self._offer_next_place(timetable_session, now) is None:
+                break
+
+    async def _offer_next_place(
+        self, timetable_session: TimetableSession, now: datetime
+    ) -> WaitlistEntry | None:
+        if timetable_session.is_full:
+            return None
+        if offer_deadline(now, timetable_session) <= now:
+            return None  # Too late for anyone to take up an offer.
+        entry = await self.session.scalar(
+            select(WaitlistEntry)
+            .where(
+                WaitlistEntry.session_id == timetable_session.id,
+                WaitlistEntry.status == WaitlistStatus.WAITING,
+            )
+            .order_by(WaitlistEntry.id)
+            .limit(1)
+            .with_for_update()
+        )
+        if entry is None:
+            return None
+        entry.status = WaitlistStatus.OFFERED
+        entry.offered_at = now
+        timetable_session.allocated_count += 1
+        return entry
+
+    async def accept_offer(self, user_id: UUID, entry_id: int) -> Booking:
+        """Turn the member's open waitlist offer into a confirmed booking.
+
+        Eligibility is checked again. If the member no longer qualifies, the offer ends,
+        the place goes to the next waiting member and the reasons are raised.
+        """
+        session_id = await self.session.scalar(
+            select(WaitlistEntry.session_id).where(
+                WaitlistEntry.id == entry_id, WaitlistEntry.user_id == user_id
+            )
+        )
+        if session_id is None:
+            raise WaitlistEntryNotFoundError("waitlist entry was not found")
+        # Lock the session before the entry, in the same order as the other writers.
+        timetable_session = await self._lock_session(session_id)
+        entry = await self.session.scalar(
+            select(WaitlistEntry)
+            .where(WaitlistEntry.id == entry_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        now = utc_now()
+        if (
+            entry.status != WaitlistStatus.OFFERED
+            or entry.offered_at is None
+            or offer_deadline(entry.offered_at, timetable_session) <= now
+        ):
+            await self.session.rollback()
+            raise BookingStateError("there is no open offer on this waitlist entry")
+        await self._lock_member(user_id)
+        context = await self._build_context(user_id, timetable_session)
+        failures = build_eligibility_chain().handle(context)
+        if failures:
+            entry.status = WaitlistStatus.EXPIRED
+            await self.release_places(timetable_session, 1, now)
+            await self.session.commit()
+            raise BookingEligibilityError(failures)
+
+        booking = await self._booking_row(user_id, timetable_session, context.bookings)
+        # The place was held for this member when the offer was made; hand it over
+        # rather than take a second one.
+        timetable_session.allocated_count -= 1
+        self._confirm(booking, timetable_session)
+        entry.status = WaitlistStatus.ACCEPTED
+        await self.session.commit()
+        await self.session.refresh(booking)
+        return booking
+
+    async def list_waitlist_for_user(self, user_id: UUID) -> list[WaitlistEntry]:
+        statement = (
+            select(WaitlistEntry)
+            .where(WaitlistEntry.user_id == user_id, WaitlistEntry.session_id.is_not(None))
+            .options(selectinload(WaitlistEntry.session))
+            .order_by(WaitlistEntry.id.desc())
+        )
+        return list((await self.session.scalars(statement)).all())
+
     async def _join_session_waitlist(self, user_id: UUID, session_id: int) -> int:
         """Add the member to the session's waiting list (once) and return their position."""
         entry = await self.session.scalar(
@@ -133,6 +262,12 @@ class BookingService:
                 WaitlistEntry.session_id == session_id, WaitlistEntry.user_id == user_id
             )
         )
+        if entry is not None and entry.status in (WaitlistStatus.EXPIRED, WaitlistStatus.ACCEPTED):
+            # A member whose offer lapsed (or whose accepted place was later given up) joins
+            # again at the back of the list, with a new entry.
+            await self.session.delete(entry)
+            await self.session.flush()
+            entry = None
         if entry is None:
             entry = WaitlistEntry(
                 session_id=session_id, user_id=user_id, status=WaitlistStatus.WAITING
@@ -200,8 +335,8 @@ class BookingService:
                 .where(TimetableSession.id == booking.timetable_session_id)
                 .with_for_update()
             )
-            if timetable_session is not None and timetable_session.allocated_count > 0:
-                timetable_session.allocated_count -= 1
+            if timetable_session is not None:
+                await self.release_places(timetable_session, 1, utc_now())
         booking.status = BookingStatus.CANCELLED
         await self.session.commit()
         await self.session.refresh(booking)

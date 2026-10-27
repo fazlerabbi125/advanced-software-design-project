@@ -66,7 +66,10 @@ class User(Base, TimestampMixin):
         back_populates="user", cascade=ASYNC_CASCADE, passive_deletes=True
     )
     access_logs: Mapped[list[AccessLog]] = relationship(
-        back_populates="user", cascade=ASYNC_CASCADE, passive_deletes=True
+        back_populates="user",
+        cascade=ASYNC_CASCADE,
+        passive_deletes=True,
+        foreign_keys="AccessLog.member_id",
     )
 
 
