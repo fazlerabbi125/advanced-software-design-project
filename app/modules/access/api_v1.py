@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -17,12 +17,13 @@ from app.modules.auth.dependencies import CurrentUser, require_roles
 
 router = APIRouter(prefix="/access", tags=["access"])
 
-@router.post("/check-in", status_code=status.HTTP_201_CREATED)
+
+@router.post("/check-in", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED)
 async def check_in(
     payload: CheckInRequest,
     service: AccessServiceDependency,
     current_user: CurrentUser,
-) -> AccessLogResponse:
+) -> Any:
     member_id = payload.member_id or current_user.id
     if member_id != current_user.id and current_user.role not in {UserRole.STAFF, UserRole.MANAGER}:
         raise HTTPException(
@@ -34,17 +35,17 @@ async def check_in(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    return AccessLogResponse.model_validate(access_log)
+    return access_log
 
 
 @router.post(
-    "/manual-check-in", status_code=status.HTTP_201_CREATED
+    "/manual-check-in", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED
 )
 async def manual_check_in(
     payload: ManualCheckInRequest,
     service: AccessServiceDependency,
     staff: Annotated[User, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
-) -> AccessLogResponse:
+) -> Any:
     """Check a member in by hand after staff have verified who they are.
 
     The same zone rules apply as at the scanner. The signed-in staff member and their
@@ -63,22 +64,22 @@ async def manual_check_in(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    return AccessLogResponse.model_validate(access_log)
+    return access_log
 
 
-@router.post("/check-out", status_code=status.HTTP_201_CREATED)
+@router.post("/check-out", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED)
 async def check_out(
     payload: CheckInRequest,
     service: AccessServiceDependency,
     current_user: CurrentUser,
-) -> AccessLogResponse:
+) -> Any:
     member_id = payload.member_id or current_user.id
     if member_id != current_user.id and current_user.role not in {UserRole.STAFF, UserRole.MANAGER}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
         )
     access_log = await service.check_out(member_id, payload.zone)
-    return AccessLogResponse.model_validate(access_log)
+    return access_log
 
 
 @router.get("/occupancy")
@@ -91,13 +92,13 @@ async def current_occupancy(
 
 
 @router.post(
-    "/device-check-in", status_code=status.HTTP_201_CREATED
+    "/device-check-in", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED
 )
 async def device_check_in(
     payload: DeviceCheckInRequest,
     service: AccessServiceDependency,
     zone: ScannerZone,
-) -> AccessLogResponse:
+) -> Any:
     """Called by a face-recognition door scanner after it has recognised a member.
 
     The scanner identifies itself with its secret key in the X-Device-Key header; the
@@ -109,18 +110,18 @@ async def device_check_in(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    return AccessLogResponse.model_validate(access_log)
+    return access_log
 
 
-@router.get("/waitlist/{zone}")
+@router.get("/waitlist/{zone}", response_model=WaitlistPositionResponse)
 async def my_waitlist_position(
     zone: AccessZone,
     service: AccessServiceDependency,
     current_user: CurrentUser,
-) -> WaitlistPositionResponse:
+) -> Any:
     """The signed-in member's place on a room's waiting list (null when not on it)."""
     position = await service.waitlist_position(current_user.id, zone)
-    return WaitlistPositionResponse(zone=zone, position=position)
+    return {"zone": zone, "position": position}
 
 
 @router.delete("/waitlist/{zone}", status_code=status.HTTP_204_NO_CONTENT)

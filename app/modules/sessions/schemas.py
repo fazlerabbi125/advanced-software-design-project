@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.bookings import BookingResourceType
 
@@ -24,6 +24,8 @@ class CreateSessionRequest(BaseModel):
 
 
 class SessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     resource_name: str
     resource_type: BookingResourceType

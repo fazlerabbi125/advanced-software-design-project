@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 class MembershipStatus(StrEnum):
     ACTIVE = "active"
     EXPIRED = "expired"
+    PENDING = "pending"
     CANCELLED = "cancelled"
 
 
