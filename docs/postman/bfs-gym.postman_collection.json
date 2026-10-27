@@ -167,6 +167,15 @@
           }
         },
         {
+          "name": "Manual check-in (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"member_id\": 1,\n  \"zone\": \"gym_floor\",\n  \"reason\": \"Scanner offline, photo ID checked\"\n}" },
+            "url": "{{baseUrl}}/access/manual-check-in"
+          }
+        },
+        {
           "name": "Check out",
           "request": {
             "method": "POST",

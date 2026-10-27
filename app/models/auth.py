@@ -38,7 +38,9 @@ class User(Base, IdMixin, TimestampMixin):
     refresh_tokens: Mapped[list[RefreshToken]] = relationship(back_populates="user")
     memberships: Mapped[list[Membership]] = relationship(back_populates="user")
     bookings: Mapped[list[Booking]] = relationship(back_populates="user")
-    access_logs: Mapped[list[AccessLog]] = relationship(back_populates="user")
+    access_logs: Mapped[list[AccessLog]] = relationship(
+        back_populates="user", foreign_keys="AccessLog.member_id"
+    )
 
 
 class RefreshToken(Base, IdMixin, TimestampMixin):

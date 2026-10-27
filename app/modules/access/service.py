@@ -38,7 +38,11 @@ class AccessService:
         zone: AccessZone,
         source: str = "biometric",
         event: AccessEvent = AccessEvent.CHECK_IN,
+        staff_id: int | None = None,
+        reason: str | None = None,
     ) -> AccessLog:
+        if event == AccessEvent.MANUAL_CHECK_IN and (staff_id is None or not reason):
+            raise ValueError("a manual check-in must record the staff member and a reason")
         # Scanner and staff check-ins name the member directly, so the account itself must be
         # checked here; a disabled account is refused even if its membership is still active.
         member = await self.session.get(User, member_id)
@@ -56,6 +60,8 @@ class AccessService:
             zone=zone.value,
             source=source,
             occurred_at=utc_now(),
+            performed_by_staff_id=staff_id,
+            staff_reason=reason,
         )
         self.session.add(access_log)
         try:
