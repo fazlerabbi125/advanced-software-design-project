@@ -14,6 +14,7 @@ from app.models.bookings import (
     WaitlistEntry,
     WaitlistStatus,
 )
+from app.models.facilities import EquipmentUnit
 from app.models.timetable_sessions import TimetableSession
 from app.modules.bookings.builder import BookingContextBuilder
 from app.modules.bookings.eligibility import (
@@ -57,7 +58,7 @@ class SessionFullError(Exception):
 
 def offer_deadline(offered_at: datetime, timetable_session: TimetableSession) -> datetime:
     """When a waitlist offer made at offered_at stops being open."""
-    if timetable_session.resource_type == BookingResourceType.POOL:
+    if timetable_session.resource_type in (BookingResourceType.POOL, BookingResourceType.EQUIPMENT):
         latest = timetable_session.ends_at - timedelta(minutes=POOL_OFFER_CUTOFF_MINUTES)
     else:
         latest = timetable_session.starts_at
@@ -115,6 +116,7 @@ class BookingService:
 
     async def create(self, user_id: UUID, timetable_session_id: int) -> Booking:
         timetable_session = await self._lock_session(timetable_session_id)
+        await self._ensure_unit_in_service(timetable_session)
         await self._lock_member(user_id)
         context = await self._build_context(user_id, timetable_session)
         await self._ensure_eligible(context)
@@ -137,6 +139,19 @@ class BookingService:
             raise SessionNotFoundError("session was not found")
         return timetable_session
 
+    async def _ensure_unit_in_service(self, timetable_session: TimetableSession) -> None:
+        """An equipment slot whose unit is out of service cannot be booked until repaired."""
+        if timetable_session.equipment_unit_id is None:
+            return
+        in_service = await self.session.scalar(
+            select(EquipmentUnit.in_service).where(
+                EquipmentUnit.id == timetable_session.equipment_unit_id
+            )
+        )
+        if not in_service:
+            await self.session.rollback()
+            raise BookingStateError("this equipment is out of service")
+
     async def _lock_member(self, user_id: UUID) -> None:
         """Serialize this member's eligibility check and write, including membership changes."""
         await self.session.execute(select(User.id).where(User.id == user_id).with_for_update())
@@ -149,6 +164,7 @@ class BookingService:
         await builder.with_membership(self.memberships)
         await builder.with_weekly_bookings()
         await builder.with_no_show_penalties()
+        await builder.with_equipment_usage()
         return builder.build()
 
     async def _ensure_eligible(self, context: BookingContext) -> None:

@@ -10,7 +10,9 @@
     { "key": "deviceKey", "value": "test-sauna-key" },
     { "key": "sessionId", "value": "1" },
     { "key": "bookingId", "value": "1" },
-    { "key": "waitlistEntryId", "value": "1" }
+    { "key": "waitlistEntryId", "value": "1" },
+    { "key": "equipmentUnitId", "value": "1" },
+    { "key": "faultId", "value": "1" }
   ],
   "item": [
     {
@@ -113,6 +115,24 @@
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\n  \"resource_name\": \"Spin class\",\n  \"resource_type\": \"class\",\n  \"starts_at\": \"2026-11-02T18:00:00Z\",\n  \"ends_at\": \"2026-11-02T18:45:00Z\",\n  \"capacity\": 12\n}" },
             "url": "{{baseUrl}}/sessions"
+          }
+        },
+        {
+          "name": "Create equipment slot (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resource_name\": \"Squat Rack 2\",\n  \"resource_type\": \"equipment\",\n  \"starts_at\": \"2026-11-02T18:00:00Z\",\n  \"ends_at\": \"2026-11-02T18:30:00Z\",\n  \"capacity\": 1,\n  \"equipment_unit_id\": {{equipmentUnitId}}\n}" },
+            "url": "{{baseUrl}}/sessions"
+          }
+        },
+        {
+          "name": "Generate equipment slots (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"equipment_unit_id\": {{equipmentUnitId}},\n  \"starts_at\": \"2026-11-02T06:00:00Z\",\n  \"ends_at\": \"2026-11-02T22:00:00Z\",\n  \"slot_minutes\": 30\n}" },
+            "url": "{{baseUrl}}/sessions/equipment-slots"
           }
         },
         {
@@ -271,6 +291,69 @@
             "method": "DELETE",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
             "url": "{{baseUrl}}/memberships/plans/4"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Equipment",
+      "item": [
+        {
+          "name": "List equipment",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/equipment"
+          }
+        },
+        {
+          "name": "Register unit (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Squat Rack 2\",\n  \"equipment_type\": \"squat rack\",\n  \"zone\": \"gym_floor\"\n}" },
+            "url": "{{baseUrl}}/equipment"
+          }
+        },
+        {
+          "name": "Report fault",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"description\": \"The safety catch on the left side is bent\"\n}" },
+            "url": "{{baseUrl}}/equipment/{{equipmentUnitId}}/faults"
+          }
+        },
+        {
+          "name": "List reported faults (staff)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/equipment/faults?status=reported"
+          }
+        },
+        {
+          "name": "Confirm fault (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/equipment/faults/{{faultId}}/confirm"
+          }
+        },
+        {
+          "name": "Dismiss fault (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/equipment/faults/{{faultId}}/dismiss"
+          }
+        },
+        {
+          "name": "Resolve fault (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/equipment/faults/{{faultId}}/resolve"
           }
         }
       ]

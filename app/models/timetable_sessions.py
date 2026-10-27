@@ -11,10 +11,11 @@ from app.models.bookings import BookingResourceType
 
 if TYPE_CHECKING:
     from app.models.bookings import Booking, WaitlistEntry
+    from app.models.facilities import EquipmentUnit
 
 
 class TimetableSession(Base, IdMixin, TimestampMixin):
-    """A scheduled class, pool lane block or personal training slot on the timetable.
+    """A scheduled class, pool lane block, personal training or equipment slot.
 
     Named TimetableSession rather than Session so it is not confused with the
     SQLAlchemy database session used everywhere in the services.
@@ -45,6 +46,12 @@ class TimetableSession(Base, IdMixin, TimestampMixin):
     capacity: Mapped[int] = mapped_column(sa.Integer)
     allocated_count: Mapped[int] = mapped_column(sa.Integer, default=0, server_default="0")
     station_count: Mapped[int | None] = mapped_column(sa.Integer)
+    # Set for equipment slots: the unit being booked. A fault can move the slot to
+    # another unit of the same type.
+    equipment_unit_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("equipment_units.id", ondelete="RESTRICT"), index=True
+    )
+    equipment_unit: Mapped[EquipmentUnit | None] = relationship()
     bookings: Mapped[list[Booking]] = relationship(back_populates="session")
     waitlist_entries: Mapped[list[WaitlistEntry]] = relationship(back_populates="session")
 

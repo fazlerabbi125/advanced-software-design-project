@@ -8,6 +8,7 @@ from app.models.bookings import (
     WaitlistEntry,
     WaitlistStatus,
 )
+from app.models.facilities import EquipmentFault, EquipmentUnit, FaultStatus
 from app.models.members import MemberProfile
 from app.models.memberships import (
     Membership,
@@ -26,6 +27,9 @@ __all__ = [
     "Booking",
     "BookingResourceType",
     "BookingStatus",
+    "EquipmentFault",
+    "EquipmentUnit",
+    "FaultStatus",
     "MemberProfile",
     "Membership",
     "MembershipEntitlement",
