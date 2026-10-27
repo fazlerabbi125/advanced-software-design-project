@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     vip_room_capacity: int = Field(default=VIP_ROOM_CAPACITY, gt=0)
     # Secret key of each face-recognition door scanner, mapped to the zone its door opens.
     scanner_device_keys: dict[str, str] = Field(default_factory=dict)
+    # Run the waitlist-offer and no-show jobs in this process. Turn off in all but one
+    # process when running several API workers.
+    enable_booking_jobs: bool = True
 
     # --- Stripe payment settings ---
     # Use Stripe test keys (sk_test_...) for local development and demos.

@@ -9,7 +9,8 @@
     { "key": "refreshToken", "value": "" },
     { "key": "deviceKey", "value": "test-sauna-key" },
     { "key": "sessionId", "value": "1" },
-    { "key": "bookingId", "value": "1" }
+    { "key": "bookingId", "value": "1" },
+    { "key": "waitlistEntryId", "value": "1" }
   ],
   "item": [
     {
@@ -142,6 +143,22 @@
             "method": "POST",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
             "url": "{{baseUrl}}/bookings/{{bookingId}}/check-in"
+          }
+        },
+        {
+          "name": "My waiting lists and offers",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/bookings/waitlist/me"
+          }
+        },
+        {
+          "name": "Accept waitlist offer",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/bookings/waitlist/{{waitlistEntryId}}/accept"
           }
         },
         {

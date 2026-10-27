@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.database import close_engine, is_database_available
 from app.core.exceptions import install_exception_handlers
 from app.core.redis import close_redis_client, is_cache_redis_available
+from app.core.scheduler import create_scheduler
 from app.utils.constants import HEALTH_CHECK_TIMEOUT_SECONDS
 
 settings = get_settings()
@@ -16,9 +17,14 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    scheduler = create_scheduler() if settings.enable_booking_jobs else None
+    if scheduler is not None:
+        scheduler.start()
     try:
         yield
     finally:
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)
         await close_redis_client()
         await close_engine()
 
