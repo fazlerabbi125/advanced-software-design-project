@@ -8,7 +8,6 @@ from app.modules.bookings.schemas import (
     BookingResponse,
     CreateBookingRequest,
     SessionWaitlistResponse,
-    WaitlistResponse,
 )
 from app.modules.bookings.service import (
     BookingNotFoundError,
@@ -106,25 +105,11 @@ async def list_my_bookings(
     return [booking_response(booking) for booking in await service.list_for_user(current_user.id)]
 
 
-@router.post(
-    "/{booking_id}/waitlist", response_model=WaitlistResponse, status_code=status.HTTP_201_CREATED
-)
-async def join_waitlist(
-    booking_id: int, current_user: CurrentUser, service: BookingServiceDependency
-) -> WaitlistResponse:
-    try:
-        entry = await service.join_waitlist(current_user.id, booking_id)
-    except ValueError as error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
-        ) from error
-    return WaitlistResponse(id=entry.id, booking_id=entry.booking_id, status=entry.status.value)
-
-
 @router.post("/{booking_id}/check-in", response_model=BookingResponse)
 async def check_in_to_booking(
     booking_id: int, current_user: CurrentUser, service: BookingServiceDependency
 ) -> BookingResponse:
+    """Check in from 15 minutes before the start until the no-show deadline."""
     try:
         return booking_response(await service.check_in(current_user.id, booking_id))
     except BookingNotFoundError as error:

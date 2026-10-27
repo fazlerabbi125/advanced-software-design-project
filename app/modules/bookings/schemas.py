@@ -28,9 +28,3 @@ class SessionWaitlistResponse(BaseModel):
     offered_at: datetime | None
     # Set while an offer is open: accept it before this time.
     offer_expires_at: datetime | None
-
-
-class WaitlistResponse(BaseModel):
-    id: int
-    booking_id: int
-    status: str

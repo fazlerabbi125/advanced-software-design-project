@@ -59,7 +59,7 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
         self.session_ids = {}
         self.clock = patch("app.modules.bookings.service.utc_now", return_value=NOW)
-        self.clock.start()
+        self.now = self.clock.start()
 
     async def asyncTearDown(self):
         self.clock.stop()
@@ -191,6 +191,7 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_check_in_only_once(self):
         booking = await self.create()
+        self.now.return_value = booking.starts_at  # the class is starting
         async with self.sessions() as session:
             checked_in = await BookingService(session).check_in(self.user_id, booking.id)
         self.assertEqual(checked_in.status, BookingStatus.CHECKED_IN)
@@ -199,3 +200,22 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
                 await BookingService(session).check_in(self.user_id, booking.id)
             with self.assertRaises(BookingStateError):
                 await BookingService(session).cancel(self.user_id, booking.id)
+
+    async def test_check_in_refused_outside_the_window(self):
+        booking = await self.create()
+        async with self.sessions() as session:
+            # The database stamps created_at with the real time; use the test clock's time.
+            row = await session.get(Booking, booking.id)
+            row.created_at = NOW
+            await session.commit()
+        self.now.return_value = booking.starts_at - timedelta(hours=1)
+        async with self.sessions() as session:
+            with self.assertRaisesRegex(BookingStateError, "check-in opens at"):
+                await BookingService(session).check_in(self.user_id, booking.id)
+        self.now.return_value = booking.starts_at + timedelta(minutes=30)
+        async with self.sessions() as session:
+            with self.assertRaisesRegex(BookingStateError, "check-in has closed"):
+                await BookingService(session).check_in(self.user_id, booking.id)
+        async with self.sessions() as session:
+            unchanged = await session.get(Booking, booking.id)
+            self.assertEqual(unchanged.status, BookingStatus.CONFIRMED)
