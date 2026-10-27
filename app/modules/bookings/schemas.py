@@ -19,6 +19,17 @@ class BookingResponse(BaseModel):
     status: str
 
 
+class SessionWaitlistResponse(BaseModel):
+    id: int
+    session_id: int
+    resource_name: str
+    starts_at: datetime
+    status: str
+    offered_at: datetime | None
+    # Set while an offer is open: accept it before this time.
+    offer_expires_at: datetime | None
+
+
 class WaitlistResponse(BaseModel):
     id: int
     booking_id: int

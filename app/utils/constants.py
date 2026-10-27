@@ -47,3 +47,13 @@ BIOMETRIC_UPLOAD_CHUNK_BYTES = 1024 * 1024
 # the oldest no-show falls outside the window.
 NO_SHOW_PENALTY_LIMIT = 3
 NO_SHOW_PENALTY_DAYS = 30
+# A place released by a cancellation, expired offer or no-show is held for the next
+# member on the waiting list for this long. A class or personal training offer also
+# ends at the session start; a pool offer ends this many minutes before the session ends.
+WAITLIST_OFFER_MINUTES = 30
+POOL_OFFER_CUTOFF_MINUTES = 15
+# A confirmed booking not checked in this long after the start (or after it was made,
+# for a booking made late) is a no-show.
+CHECK_IN_GRACE_MINUTES = 10
+# How often the scheduler expires offers and looks for no-shows.
+BOOKING_JOBS_INTERVAL_SECONDS = 60
