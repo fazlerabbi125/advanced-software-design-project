@@ -1,20 +1,25 @@
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.models.auth import UserRole
 from app.models.memberships import Membership, MembershipPlan
-from app.modules.auth.dependencies import CurrentUser
+from app.modules.auth.dependencies import CurrentUser, require_roles
 from app.modules.memberships.dependencies import MembershipServiceDependency
 from app.modules.memberships.schemas import (
+    CreatePlanRequest,
     MembershipResponse,
     PlanResponse,
     PurchaseRequest,
     PurchaseResponse,
+    UpdatePlanRequest,
 )
 from app.modules.memberships.service import (
     ActiveMembershipExistsError,
     MembershipNotFoundError,
     PaymentDeclinedError,
+    PlanNameTakenError,
     PlanNotFoundError,
 )
 from app.modules.memberships.states import MembershipActionError, state_of
@@ -40,6 +45,9 @@ def plan_response(plan: MembershipPlan) -> PlanResponse:
         price_minor=plan.price_minor,
         currency=plan.currency,
         duration_days=plan.duration_days,
+        booking_window_days=plan.booking_window_days,
+        weekly_booking_limit=plan.weekly_booking_limit,
+        is_active=plan.is_active,
         entitlements=sorted(entry.entitlement.value for entry in plan.entitlements),
     )
 
@@ -47,6 +55,61 @@ def plan_response(plan: MembershipPlan) -> PlanResponse:
 @router.get("/plans", response_model=list[PlanResponse])
 async def list_plans(service: MembershipServiceDependency) -> list[PlanResponse]:
     return [plan_response(plan) for plan in await service.list_plans()]
+
+
+@router.get("/plans/all", response_model=list[PlanResponse])
+async def list_all_plans(
+    service: MembershipServiceDependency,
+    _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
+) -> list[PlanResponse]:
+    """Every plan, including ones taken off sale (managers only)."""
+    return [plan_response(plan) for plan in await service.list_all_plans()]
+
+
+@router.post("/plans", response_model=PlanResponse, status_code=status.HTTP_201_CREATED)
+async def create_plan(
+    payload: CreatePlanRequest,
+    service: MembershipServiceDependency,
+    _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
+) -> PlanResponse:
+    """Create a plan with its price, booking limits and entitlements (managers only)."""
+    try:
+        plan = await service.create_plan(**payload.model_dump())
+    except PlanNameTakenError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    return plan_response(plan)
+
+
+@router.patch("/plans/{plan_id}", response_model=PlanResponse)
+async def update_plan(
+    plan_id: int,
+    payload: UpdatePlanRequest,
+    service: MembershipServiceDependency,
+    _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
+) -> PlanResponse:
+    """Change only the fields sent (managers only). Sending entitlements replaces the set."""
+    changes = payload.model_dump(exclude_none=True)
+    entitlements = changes.pop("entitlements", None)
+    try:
+        plan = await service.update_plan(plan_id, entitlements=entitlements, **changes)
+    except PlanNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except PlanNameTakenError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    return plan_response(plan)
+
+
+@router.delete("/plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def deactivate_plan(
+    plan_id: int,
+    service: MembershipServiceDependency,
+    _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
+) -> None:
+    """Take a plan off sale (managers only). Current members keep it until it ends."""
+    try:
+        await service.deactivate_plan(plan_id)
+    except PlanNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 
 
 @router.post("/purchase", response_model=PurchaseResponse, status_code=status.HTTP_201_CREATED)

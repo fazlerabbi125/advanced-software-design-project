@@ -3,19 +3,19 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.models.access import AccessEvent, AccessZone
-from app.models.auth import UserRole
+from app.models.auth import User, UserRole
 from app.modules.access.dependencies import AccessServiceDependency, ScannerZone
 from app.modules.access.policies import ZoneFullError
 from app.modules.access.schemas import (
     AccessLogResponse,
     CheckInRequest,
     DeviceCheckInRequest,
+    ManualCheckInRequest,
     WaitlistPositionResponse,
 )
 from app.modules.auth.dependencies import CurrentUser, require_roles
 
 router = APIRouter(prefix="/access", tags=["access"])
-
 
 @router.post("/check-in", status_code=status.HTTP_201_CREATED)
 async def check_in(
@@ -34,50 +34,39 @@ async def check_in(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    return AccessLogResponse(
-        id=access_log.id,
-        member_id=access_log.member_id,
-        event=access_log.event.value,
-        zone=access_log.zone,
-        source=access_log.source,
-        occurred_at=access_log.occurred_at,
-    )
+    return AccessLogResponse.model_validate(access_log)
 
 
 @router.post(
-    "/manual-check-in", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED
+    "/manual-check-in", status_code=status.HTTP_201_CREATED
 )
 async def manual_check_in(
-    payload: CheckInRequest,
+    payload: ManualCheckInRequest,
     service: AccessServiceDependency,
-    _: Annotated[object, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
+    staff: Annotated[User, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
 ) -> AccessLogResponse:
-    if payload.member_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="member_id is required"
-        )
+    """Check a member in by hand after staff have verified who they are.
+
+    The same zone rules apply as at the scanner. The signed-in staff member and their
+    reason are stored with the entry.
+    """
     try:
         access_log = await service.check_in(
             payload.member_id,
             payload.zone,
             source="manual",
             event=AccessEvent.MANUAL_CHECK_IN,
+            staff_id=staff.id,
+            reason=payload.reason,
         )
     except ZoneFullError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    return AccessLogResponse(
-        id=access_log.id,
-        member_id=access_log.member_id,
-        event=access_log.event.value,
-        zone=access_log.zone,
-        source=access_log.source,
-        occurred_at=access_log.occurred_at,
-    )
+    return AccessLogResponse.model_validate(access_log)
 
 
-@router.post("/check-out", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/check-out", status_code=status.HTTP_201_CREATED)
 async def check_out(
     payload: CheckInRequest,
     service: AccessServiceDependency,
@@ -89,17 +78,10 @@ async def check_out(
             status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
         )
     access_log = await service.check_out(member_id, payload.zone)
-    return AccessLogResponse(
-        id=access_log.id,
-        member_id=access_log.member_id,
-        event=access_log.event.value,
-        zone=access_log.zone,
-        source=access_log.source,
-        occurred_at=access_log.occurred_at,
-    )
+    return AccessLogResponse.model_validate(access_log)
 
 
-@router.get("/occupancy", response_model=dict[str, int])
+@router.get("/occupancy")
 async def current_occupancy(
     service: AccessServiceDependency,
     _: Annotated[object, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
@@ -109,7 +91,7 @@ async def current_occupancy(
 
 
 @router.post(
-    "/device-check-in", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED
+    "/device-check-in", status_code=status.HTTP_201_CREATED
 )
 async def device_check_in(
     payload: DeviceCheckInRequest,
@@ -127,17 +109,10 @@ async def device_check_in(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    return AccessLogResponse(
-        id=access_log.id,
-        member_id=access_log.member_id,
-        event=access_log.event.value,
-        zone=access_log.zone,
-        source=access_log.source,
-        occurred_at=access_log.occurred_at,
-    )
+    return AccessLogResponse.model_validate(access_log)
 
 
-@router.get("/waitlist/{zone}", response_model=WaitlistPositionResponse)
+@router.get("/waitlist/{zone}")
 async def my_waitlist_position(
     zone: AccessZone,
     service: AccessServiceDependency,
