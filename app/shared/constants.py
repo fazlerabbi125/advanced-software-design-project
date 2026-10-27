@@ -55,5 +55,7 @@ POOL_OFFER_CUTOFF_MINUTES = 15
 # A confirmed booking not checked in this long after the start (or after it was made,
 # for a booking made late) is a no-show.
 CHECK_IN_GRACE_MINUTES = 10
+# Check-in to a booked session opens this many minutes before the session starts.
+CHECK_IN_OPENS_MINUTES = 15
 # How often the scheduler expires offers and looks for no-shows.
 BOOKING_JOBS_INTERVAL_SECONDS = 60

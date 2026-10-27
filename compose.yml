@@ -84,6 +84,7 @@ services:
       STRIPE_API_KEY: ${STRIPE_SECRET_KEY}
     command: >
       listen
+      --all-snapshot
       --forward-to http://api:8000/api/v1/payments/stripe/webhook
     depends_on:
       api:

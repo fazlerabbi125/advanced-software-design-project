@@ -53,11 +53,3 @@ class SessionWaitlistResponse(BaseModel):
                 offer_deadline(value.offered_at, timetable_session) if is_open else None
             ),
         }
-
-
-class WaitlistResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    booking_id: int
-    status: WaitlistStatus

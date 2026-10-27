@@ -8,7 +8,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import ASYNC_CASCADE, Base, IdMixin, TimestampMixin, enum_values
+from app.models.base import Base, IdMixin, TimestampMixin, enum_values
 
 if TYPE_CHECKING:
     from app.models.auth import User
@@ -69,22 +69,13 @@ class Booking(Base, IdMixin, TimestampMixin):
     )
     user: Mapped[User] = relationship(back_populates="bookings")
     session: Mapped[TimetableSession | None] = relationship(back_populates="bookings")
-    waitlist_entries: Mapped[list[WaitlistEntry]] = relationship(
-        back_populates="booking", cascade=ASYNC_CASCADE, passive_deletes=True
-    )
 
 
 class WaitlistEntry(Base, IdMixin, TimestampMixin):
     __tablename__ = "waitlist_entries"
-    __table_args__ = (
-        sa.UniqueConstraint("booking_id", "user_id"),
-        sa.UniqueConstraint("session_id", "user_id"),
-    )
+    __table_args__ = (sa.UniqueConstraint("session_id", "user_id"),)
 
-    booking_id: Mapped[int | None] = mapped_column(
-        sa.ForeignKey("bookings.id", ondelete="CASCADE"), index=True
-    )
-    session_id: Mapped[int | None] = mapped_column(
+    session_id: Mapped[int] = mapped_column(
         sa.ForeignKey("timetable_sessions.id", ondelete="RESTRICT"), index=True
     )
     user_id: Mapped[UUID] = mapped_column(
@@ -101,6 +92,5 @@ class WaitlistEntry(Base, IdMixin, TimestampMixin):
         default=WaitlistStatus.WAITING,
     )
     offered_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
-    booking: Mapped[Booking | None] = relationship(back_populates="waitlist_entries")
-    session: Mapped[TimetableSession | None] = relationship(back_populates="waitlist_entries")
+    session: Mapped[TimetableSession] = relationship(back_populates="waitlist_entries")
     user: Mapped[User] = relationship(back_populates="waitlist_entries")

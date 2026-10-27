@@ -24,6 +24,7 @@ from app.modules.bookings.eligibility import (
 from app.modules.memberships.service import MembershipService
 from app.shared.constants import (
     CHECK_IN_GRACE_MINUTES,
+    CHECK_IN_OPENS_MINUTES,
     POOL_OFFER_CUTOFF_MINUTES,
     WAITLIST_OFFER_MINUTES,
 )
@@ -70,6 +71,30 @@ def check_in_deadline(booking: Booking) -> datetime:
         minutes=CHECK_IN_GRACE_MINUTES
     )
     return min(deadline, booking.ends_at) if booking.ends_at is not None else deadline
+
+
+def check_in_opens_at(booking: Booking) -> datetime:
+    """The earliest moment the member can check in to a booked session."""
+    return booking.starts_at - timedelta(minutes=CHECK_IN_OPENS_MINUTES)
+
+
+def check_in_problem(booking: Booking, now: datetime) -> str | None:
+    """Why the booking cannot be checked in at now, or None if it can.
+
+    Check-in closes at the same deadline the no-show job uses, so a booking is never
+    both too late to check in and not yet a no-show.
+    """
+    if booking.status != BookingStatus.CONFIRMED:
+        return "only a confirmed booking can be checked in"
+    opens_at = check_in_opens_at(booking)
+    if now < opens_at:
+        return (
+            f"check-in opens at {opens_at:%Y-%m-%d %H:%M} UTC, "
+            f"{CHECK_IN_OPENS_MINUTES} minutes before the session starts"
+        )
+    if now >= check_in_deadline(booking):
+        return "check-in has closed for this booking"
+    return None
 
 
 def _same_slot(bookings: Sequence[Booking], timetable_session: TimetableSession) -> Booking | None:
@@ -249,7 +274,7 @@ class BookingService:
     async def list_waitlist_for_user(self, user_id: UUID) -> list[WaitlistEntry]:
         statement = (
             select(WaitlistEntry)
-            .where(WaitlistEntry.user_id == user_id, WaitlistEntry.session_id.is_not(None))
+            .where(WaitlistEntry.user_id == user_id)
             .options(selectinload(WaitlistEntry.session))
             .order_by(WaitlistEntry.id.desc())
         )
@@ -283,28 +308,6 @@ class BookingService:
         )
         await self.session.commit()
         return position or 0
-
-    async def join_waitlist(self, user_id: UUID, booking_id: int) -> WaitlistEntry:
-        booking = await self.session.get(Booking, booking_id)
-        if booking is None or booking.status != BookingStatus.CONFIRMED:
-            raise ValueError("booking is not available for a waitlist")
-        existing = await self.session.scalar(
-            select(WaitlistEntry).where(
-                WaitlistEntry.booking_id == booking_id,
-                WaitlistEntry.user_id == user_id,
-            )
-        )
-        if existing is not None:
-            raise ValueError("already on this waitlist")
-        waitlist_entry = WaitlistEntry(
-            booking_id=booking_id,
-            user_id=user_id,
-            status=WaitlistStatus.WAITING,
-        )
-        self.session.add(waitlist_entry)
-        await self.session.commit()
-        await self.session.refresh(waitlist_entry)
-        return waitlist_entry
 
     async def list_for_user(self, user_id: UUID) -> list[Booking]:
         statement = (
@@ -344,9 +347,10 @@ class BookingService:
 
     async def check_in(self, user_id: UUID, booking_id: int) -> Booking:
         booking = await self._locked_owned_booking(user_id, booking_id)
-        if booking.status != BookingStatus.CONFIRMED:
+        problem = check_in_problem(booking, utc_now())
+        if problem is not None:
             await self.session.rollback()
-            raise BookingStateError("only a confirmed booking can be checked in")
+            raise BookingStateError(problem)
         booking.status = BookingStatus.CHECKED_IN
         await self.session.commit()
         await self.session.refresh(booking)
