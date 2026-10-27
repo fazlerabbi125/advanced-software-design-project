@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.models.bookings import Booking, BookingResourceType, BookingStatus
 from app.models.memberships import Membership, MembershipEntitlement, MembershipStatus
-from app.utils.constants import NO_SHOW_PENALTY_DAYS, NO_SHOW_PENALTY_LIMIT
+from app.shared.constants import NO_SHOW_PENALTY_DAYS, NO_SHOW_PENALTY_LIMIT
 
 REQUIRED_ENTITLEMENTS = {
     BookingResourceType.CLASS: MembershipEntitlement.CLASS_BOOKING,

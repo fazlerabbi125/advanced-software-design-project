@@ -1,18 +1,19 @@
 from datetime import datetime
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.models.access import AccessZone
 
 
 class CheckInRequest(BaseModel):
-    member_id: int | None = Field(default=None, gt=0)
+    member_id: UUID | None = None
     zone: AccessZone = AccessZone.GYM_FLOOR
 
 
 class AccessLogResponse(BaseModel):
     id: int
-    member_id: int
+    member_id: UUID
     event: str
     zone: str
     source: str
@@ -22,7 +23,7 @@ class AccessLogResponse(BaseModel):
 class DeviceCheckInRequest(BaseModel):
     """Sent by a door scanner after it has recognised a member's face."""
 
-    member_id: int = Field(gt=0)
+    member_id: UUID
 
 
 class WaitlistPositionResponse(BaseModel):

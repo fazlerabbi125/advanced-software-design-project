@@ -3,10 +3,10 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.core.config import get_settings
-from app.utils.constants import ALLOWED_BIOMETRIC_IMAGE_TYPES, BIOMETRIC_UPLOAD_CHUNK_BYTES
+from app.shared.constants import ALLOWED_BIOMETRIC_IMAGE_TYPES, BIOMETRIC_UPLOAD_CHUNK_BYTES
 
 
 class UploadStream(Protocol):
@@ -25,7 +25,7 @@ class StoredBiometricImage:
 
 
 class BiometricImageStorage:
-    async def save(self, user_id: int, upload: UploadStream) -> StoredBiometricImage:
+    async def save(self, user_id: UUID, upload: UploadStream) -> StoredBiometricImage:
         settings = get_settings()
         content_type = upload.content_type or ""
         if content_type not in ALLOWED_BIOMETRIC_IMAGE_TYPES:

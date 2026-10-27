@@ -18,8 +18,8 @@ from sqlalchemy import select
 from app.core.database import engine, session_factory
 from app.core.security import hash_password
 from app.models.auth import User, UserRole
-from app.utils.constants import MIN_PASSWORD_LENGTH
-from app.utils.helpers import normalize_email
+from app.shared.constants import MIN_PASSWORD_LENGTH
+from app.shared.helpers import normalize_email
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

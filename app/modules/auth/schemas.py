@@ -1,17 +1,21 @@
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.utils.constants import MIN_PASSWORD_LENGTH
+from app.shared.constants import MIN_PASSWORD_LENGTH
 
 
 class RegisterRequest(BaseModel):
     email: str
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
+    name: str = Field(min_length=1, max_length=200)
+    phone: str | None = Field(default=None, max_length=30)
 
 
-class LoginRequest(RegisterRequest):
-    pass
+class LoginRequest(BaseModel):
+    email: str
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
 
 
 class RefreshRequest(BaseModel):
@@ -19,7 +23,7 @@ class RefreshRequest(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: int
+    id: UUID
     email: str
     role: str
     created_at: datetime

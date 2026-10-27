@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import date
 from enum import StrEnum
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, IdMixin, TimestampMixin
+from app.models.base import ASYNC_CASCADE, Base, IdMixin, TimestampMixin, enum_values
 
 if TYPE_CHECKING:
     from app.models.auth import User
@@ -45,7 +46,7 @@ class MembershipPlan(Base, IdMixin, TimestampMixin):
     weekly_booking_limit: Mapped[int] = mapped_column(default=3, server_default="3")
     memberships: Mapped[list[Membership]] = relationship(back_populates="plan")
     entitlements: Mapped[list[PlanEntitlement]] = relationship(
-        back_populates="plan", cascade="all, delete-orphan"
+        back_populates="plan", cascade=ASYNC_CASCADE, passive_deletes=True
     )
 
 
@@ -62,6 +63,7 @@ class PlanEntitlement(Base, IdMixin, TimestampMixin):
             name="membership_entitlement",
             native_enum=False,
             create_constraint=True,
+            values_callable=enum_values,
         )
     )
     plan: Mapped[MembershipPlan] = relationship(back_populates="entitlements")
@@ -70,11 +72,17 @@ class PlanEntitlement(Base, IdMixin, TimestampMixin):
 class Membership(Base, IdMixin, TimestampMixin):
     __tablename__ = "memberships"
 
-    user_id: Mapped[int] = mapped_column(sa.ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    user_id: Mapped[UUID] = mapped_column(
+        sa.Uuid(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     plan_id: Mapped[int] = mapped_column(sa.ForeignKey("membership_plans.id", ondelete="RESTRICT"))
     status: Mapped[MembershipStatus] = mapped_column(
         sa.Enum(
-            MembershipStatus, name="membership_status", native_enum=False, create_constraint=True
+            MembershipStatus,
+            name="membership_status",
+            native_enum=False,
+            create_constraint=True,
+            values_callable=enum_values,
         ),
         default=MembershipStatus.ACTIVE,
     )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -15,9 +16,11 @@ if TYPE_CHECKING:
 class MemberProfile(Base, IdMixin, TimestampMixin):
     __tablename__ = "member_profiles"
 
-    user_id: Mapped[int] = mapped_column(
-        sa.ForeignKey("users.id", ondelete="RESTRICT"), unique=True
+    user_id: Mapped[UUID] = mapped_column(
+        sa.Uuid(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), unique=True
     )
+    name: Mapped[str] = mapped_column(sa.String(200))
+    phone: Mapped[str | None] = mapped_column(sa.String(30))
     date_of_birth: Mapped[date | None] = mapped_column(sa.Date)
     biometric_image_key: Mapped[str | None] = mapped_column(sa.String(512), unique=True)
     biometric_content_type: Mapped[str | None] = mapped_column(sa.String(100))

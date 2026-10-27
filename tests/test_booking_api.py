@@ -1,6 +1,7 @@
 import os
 import unittest
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -25,6 +26,8 @@ class BookingApiTests(unittest.TestCase):
             "JWT_ISSUER": "test",
             "JWT_AUDIENCE": "test",
             "UPLOAD_ROOT": "/tmp/bfs-test-unused",
+            "STRIPE_SECRET_KEY": "sk_test_validation",
+            "STRIPE_WEBHOOK_SECRET": "whsec_validation",
         }
         with patch.dict(os.environ, settings):
             from app.modules.auth.dependencies import get_current_user
@@ -38,12 +41,12 @@ class BookingApiTests(unittest.TestCase):
         service.create.side_effect = BookingEligibilityError(failures)
         app = FastAPI()
         app.include_router(router)
-        app.dependency_overrides[get_current_user] = lambda: User(id=1)
+        app.dependency_overrides[get_current_user] = lambda: User(id=uuid4())
         app.dependency_overrides[get_booking_service] = lambda: service
         with TestClient(app) as client:
             response = client.post(
                 "/bookings",
-                json={"session_id": 1},
+                json={"timetable_session_id": 1},
             )
         self.assertEqual(response.status_code, 422)
         self.assertEqual(

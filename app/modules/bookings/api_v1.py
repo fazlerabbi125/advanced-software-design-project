@@ -18,7 +18,7 @@ router = APIRouter(prefix="/bookings", tags=["bookings"])
 def booking_response(booking: Booking) -> BookingResponse:
     return BookingResponse(
         id=booking.id,
-        session_id=booking.session_id,
+        timetable_session_id=booking.timetable_session_id,
         resource_name=booking.resource_name,
         resource_type=booking.resource_type,
         starts_at=booking.starts_at,
@@ -33,7 +33,7 @@ async def create_booking(
 ) -> BookingResponse:
     """Book a place on a timetable session (see GET /sessions for the session ids)."""
     try:
-        return booking_response(await service.create(current_user.id, payload.session_id))
+        return booking_response(await service.create(current_user.id, payload.timetable_session_id))
     except SessionNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SessionFullError as error:

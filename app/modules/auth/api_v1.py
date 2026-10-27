@@ -27,7 +27,8 @@ def token_response(tokens: TokenPair) -> TokenResponse:
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest, service: AuthServiceDependency) -> UserResponse:
     try:
-        return user_response(await service.register(payload.email, payload.password))
+        user = await service.register(payload.email, payload.password, payload.name, payload.phone)
+        return user_response(user)
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
 

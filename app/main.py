@@ -6,10 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
-from app.core.database import close_engine, is_database_available
+from app.core.database import close_db_engine, is_db_available
 from app.core.exceptions import install_exception_handlers
 from app.core.redis import close_redis_client, is_cache_redis_available
-from app.utils.constants import HEALTH_CHECK_TIMEOUT_SECONDS
+from app.shared.constants import HEALTH_CHECK_TIMEOUT_SECONDS
 
 settings = get_settings()
 
@@ -20,11 +20,10 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         await close_redis_client()
-        await close_engine()
+        await close_db_engine()
 
 
-app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
-install_exception_handlers(app)
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.enable_debug else settings.cors_allow_origins,
@@ -32,6 +31,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+install_exception_handlers(app)
 app.include_router(api_router)
 
 
@@ -41,7 +41,7 @@ async def health_check() -> dict[str, str]:
     try:
         database_available, cache_redis_available = await wait_for(
             gather(
-                is_database_available(),
+                is_db_available(),
                 is_cache_redis_available(),
             ),
             timeout=HEALTH_CHECK_TIMEOUT_SECONDS,

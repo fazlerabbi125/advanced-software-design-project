@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 
 from app.models.auth import UserRole
-from app.models.sessions import TimetableSession
+from app.models.timetable_sessions import TimetableSession
 from app.modules.auth.dependencies import CurrentUser, require_roles
 from app.modules.sessions.dependencies import TimetableServiceDependency
 from app.modules.sessions.schemas import CreateSessionRequest, SessionResponse

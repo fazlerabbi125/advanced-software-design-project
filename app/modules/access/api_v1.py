@@ -17,7 +17,7 @@ from app.modules.auth.dependencies import CurrentUser, require_roles
 router = APIRouter(prefix="/access", tags=["access"])
 
 
-@router.post("/check-in", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/check-in", status_code=status.HTTP_201_CREATED)
 async def check_in(
     payload: CheckInRequest,
     service: AccessServiceDependency,

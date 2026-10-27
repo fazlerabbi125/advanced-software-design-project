@@ -1,5 +1,6 @@
 import logging
 from typing import Protocol
+from uuid import UUID
 
 from redis.exceptions import RedisError
 
@@ -7,7 +8,7 @@ from app.models.access import AccessZone
 from app.models.memberships import MembershipEntitlement
 from app.modules.access.occupancy import EntryOutcome, ZoneOccupancy
 from app.modules.memberships.service import MembershipService
-from app.utils.constants import ZONE_STAY_MINUTES
+from app.shared.constants import ZONE_STAY_MINUTES
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class ZoneFullError(AccessDeniedError):
 class AccessPolicy(Protocol):
     """A rule that decides whether a member may enter a zone."""
 
-    async def check(self, member_id: int, zone: AccessZone) -> bool:
+    async def check(self, member_id: UUID, zone: AccessZone) -> bool:
         """Admit the member, or raise AccessDeniedError to refuse entry.
 
         Returning normally means the member is let in and counted in the zone. Returns
@@ -50,7 +51,7 @@ class GymFloorPolicy:
         self.memberships = memberships
         self.occupancy = occupancy
 
-    async def check(self, member_id: int, zone: AccessZone) -> bool:
+    async def check(self, member_id: UUID, zone: AccessZone) -> bool:
         if not await self.memberships.has_entitlement(
             member_id, MembershipEntitlement.GYM_FLOOR_ACCESS
         ):
@@ -77,7 +78,7 @@ class VipAreaPolicy:
         self.occupancy = occupancy
         self.capacity = capacity
 
-    async def check(self, member_id: int, zone: AccessZone) -> bool:
+    async def check(self, member_id: UUID, zone: AccessZone) -> bool:
         if not await self.memberships.has_entitlement(
             member_id, MembershipEntitlement.VIP_AREA_ACCESS
         ):

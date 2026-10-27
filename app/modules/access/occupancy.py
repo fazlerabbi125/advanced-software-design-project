@@ -1,11 +1,12 @@
 import time
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import UUID
 
 from redis.asyncio import Redis
 
 from app.core.redis import get_redis_client
-from app.utils.constants import VIP_WAITLIST_HOLD_MINUTES, CacheKey
+from app.shared.constants import VIP_WAITLIST_HOLD_MINUTES, CacheKey
 
 # Runs inside Redis as a single step, so two people arriving at the same moment
 # cannot both take the last free place, and nobody can jump the waiting list.
@@ -69,7 +70,7 @@ class ZoneOccupancy:
         self.client = client
 
     async def enter(
-        self, zone: str, member_id: int, stay_seconds: int, capacity: int | None = None
+        self, zone: str, member_id: UUID, stay_seconds: int, capacity: int | None = None
     ) -> Entry:
         """Let the member in if there is a place for them, otherwise add them to the
         zone's waiting list and report their position on it (1 = next in)."""
@@ -82,7 +83,7 @@ class ZoneOccupancy:
                 CacheKey.VIP_WAITLIST.build(zone),
                 now,
                 now + stay_seconds,
-                member_id,
+                str(member_id),
                 capacity or 0,
                 CacheKey.OCCUPANCY.ttl_seconds,
                 VIP_WAITLIST_HOLD_MINUTES * 60,
@@ -94,8 +95,8 @@ class ZoneOccupancy:
             return Entry(EntryOutcome.ALREADY_INSIDE)
         return Entry(EntryOutcome.WAITLISTED, waitlist_position=-result)
 
-    async def leave(self, zone: str, member_id: int) -> None:
-        await self.client.zrem(CacheKey.OCCUPANCY.build(zone), member_id)
+    async def leave(self, zone: str, member_id: UUID) -> None:
+        await self.client.zrem(CacheKey.OCCUPANCY.build(zone), str(member_id))
 
     async def count(self, zone: str) -> int:
         key = CacheKey.OCCUPANCY.build(zone)
@@ -105,18 +106,18 @@ class ZoneOccupancy:
             _, count = await pipeline.execute()
         return int(count)
 
-    async def waitlist_position(self, zone: str, member_id: int) -> int | None:
+    async def waitlist_position(self, zone: str, member_id: UUID) -> int | None:
         """The member's place on the zone's waiting list (1 = next in), or None."""
         key = CacheKey.VIP_WAITLIST.build(zone)
         oldest_kept = time.time() - VIP_WAITLIST_HOLD_MINUTES * 60
         async with self.client.pipeline(transaction=True) as pipeline:
             pipeline.zremrangebyscore(key, "-inf", oldest_kept)
-            pipeline.zrank(key, member_id)
+            pipeline.zrank(key, str(member_id))
             _, rank = await pipeline.execute()
         return None if rank is None else int(rank) + 1
 
-    async def leave_waitlist(self, zone: str, member_id: int) -> None:
-        await self.client.zrem(CacheKey.VIP_WAITLIST.build(zone), member_id)
+    async def leave_waitlist(self, zone: str, member_id: UUID) -> None:
+        await self.client.zrem(CacheKey.VIP_WAITLIST.build(zone), str(member_id))
 
 
 def get_zone_occupancy() -> ZoneOccupancy:

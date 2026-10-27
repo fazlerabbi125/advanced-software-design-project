@@ -1,11 +1,12 @@
 from collections.abc import Sequence
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.auth import User
 from app.models.bookings import Booking, BookingStatus, WaitlistEntry, WaitlistStatus
-from app.models.sessions import TimetableSession
+from app.models.timetable_sessions import TimetableSession
 from app.modules.bookings.builder import BookingContextBuilder
 from app.modules.bookings.eligibility import (
     BookingContext,
@@ -13,7 +14,7 @@ from app.modules.bookings.eligibility import (
     build_eligibility_chain,
 )
 from app.modules.memberships.service import MembershipService
-from app.utils.helpers import utc_now
+from app.shared.helpers import utc_now
 
 
 class SessionNotFoundError(LookupError):
@@ -52,14 +53,14 @@ class BookingService:
         self.session = session
         self.memberships = MembershipService(session)
 
-    async def create(self, user_id: int, session_id: int) -> Booking:
-        timetable_session = await self._lock_session(session_id)
+    async def create(self, user_id: UUID, timetable_session_id: int) -> Booking:
+        timetable_session = await self._lock_session(timetable_session_id)
         await self._lock_member(user_id)
         context = await self._build_context(user_id, timetable_session)
         await self._ensure_eligible(context)
         # Only eligible members reach the waiting list.
         if timetable_session.is_full:
-            raise SessionFullError(await self._join_session_waitlist(user_id, session_id))
+            raise SessionFullError(await self._join_session_waitlist(user_id, timetable_session_id))
         booking = await self._booking_row(user_id, timetable_session, context.bookings)
         self._confirm(booking, timetable_session)
         await self.session.commit()
@@ -76,12 +77,12 @@ class BookingService:
             raise SessionNotFoundError("session was not found")
         return timetable_session
 
-    async def _lock_member(self, user_id: int) -> None:
+    async def _lock_member(self, user_id: UUID) -> None:
         """Serialize this member's eligibility check and write, including membership changes."""
         await self.session.execute(select(User.id).where(User.id == user_id).with_for_update())
 
     async def _build_context(
-        self, user_id: int, timetable_session: TimetableSession
+        self, user_id: UUID, timetable_session: TimetableSession
     ) -> BookingContext:
         builder = BookingContextBuilder(self.session, user_id, utc_now())
         builder.with_session(timetable_session)
@@ -97,7 +98,7 @@ class BookingService:
             raise BookingEligibilityError(failures)
 
     async def _booking_row(
-        self, user_id: int, timetable_session: TimetableSession, bookings: Sequence[Booking]
+        self, user_id: UUID, timetable_session: TimetableSession, bookings: Sequence[Booking]
     ) -> Booking:
         """Return the member's cancelled row for this slot to reuse, or a new row.
 
@@ -117,7 +118,7 @@ class BookingService:
     @staticmethod
     def _confirm(booking: Booking, timetable_session: TimetableSession) -> None:
         """Copy the session details onto the booking and take one place."""
-        booking.session_id = timetable_session.id
+        booking.timetable_session_id = timetable_session.id
         booking.resource_name = timetable_session.resource_name
         booking.resource_type = timetable_session.resource_type
         booking.starts_at = timetable_session.starts_at
@@ -125,7 +126,7 @@ class BookingService:
         booking.status = BookingStatus.CONFIRMED
         timetable_session.allocated_count += 1
 
-    async def _join_session_waitlist(self, user_id: int, session_id: int) -> int:
+    async def _join_session_waitlist(self, user_id: UUID, session_id: int) -> int:
         """Add the member to the session's waiting list (once) and return their position."""
         entry = await self.session.scalar(
             select(WaitlistEntry).where(
@@ -148,7 +149,7 @@ class BookingService:
         await self.session.commit()
         return position or 0
 
-    async def join_waitlist(self, user_id: int, booking_id: int) -> WaitlistEntry:
+    async def join_waitlist(self, user_id: UUID, booking_id: int) -> WaitlistEntry:
         booking = await self.session.get(Booking, booking_id)
         if booking is None or booking.status != BookingStatus.CONFIRMED:
             raise ValueError("booking is not available for a waitlist")
@@ -170,13 +171,13 @@ class BookingService:
         await self.session.refresh(waitlist_entry)
         return waitlist_entry
 
-    async def list_for_user(self, user_id: int) -> list[Booking]:
+    async def list_for_user(self, user_id: UUID) -> list[Booking]:
         statement = (
             select(Booking).where(Booking.user_id == user_id).order_by(Booking.starts_at.desc())
         )
         return list((await self.session.scalars(statement)).all())
 
-    async def _locked_owned_booking(self, user_id: int, booking_id: int) -> Booking:
+    async def _locked_owned_booking(self, user_id: UUID, booking_id: int) -> Booking:
         booking = await self.session.scalar(
             select(Booking)
             .where(Booking.id == booking_id, Booking.user_id == user_id)
@@ -186,17 +187,17 @@ class BookingService:
             raise BookingNotFoundError("booking was not found")
         return booking
 
-    async def cancel(self, user_id: int, booking_id: int) -> Booking:
+    async def cancel(self, user_id: UUID, booking_id: int) -> Booking:
         booking = await self._locked_owned_booking(user_id, booking_id)
         if booking.status != BookingStatus.CONFIRMED:
             message = f"a {booking.status.value} booking cannot be cancelled"
             await self.session.rollback()
             raise BookingStateError(message)
-        if booking.session_id is not None:
+        if booking.timetable_session_id is not None:
             # Give the place back to the session.
             timetable_session = await self.session.scalar(
                 select(TimetableSession)
-                .where(TimetableSession.id == booking.session_id)
+                .where(TimetableSession.id == booking.timetable_session_id)
                 .with_for_update()
             )
             if timetable_session is not None and timetable_session.allocated_count > 0:
@@ -206,7 +207,7 @@ class BookingService:
         await self.session.refresh(booking)
         return booking
 
-    async def check_in(self, user_id: int, booking_id: int) -> Booking:
+    async def check_in(self, user_id: UUID, booking_id: int) -> Booking:
         booking = await self._locked_owned_booking(user_id, booking_id)
         if booking.status != BookingStatus.CONFIRMED:
             await self.session.rollback()

@@ -6,12 +6,12 @@ from app.models.bookings import BookingResourceType
 
 
 class CreateBookingRequest(BaseModel):
-    session_id: int
+    timetable_session_id: int
 
 
 class BookingResponse(BaseModel):
     id: int
-    session_id: int | None
+    timetable_session_id: int | None
     resource_name: str
     resource_type: BookingResourceType
     starts_at: datetime

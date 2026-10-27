@@ -1,6 +1,6 @@
 # BFS Gym API
 
-BFS Gym is a membership and facility-access management API built for the CS6451 Advanced Software Design group project. The gym offers a gym floor, swimming pool, fitness classes, personal training sessions, and VIP wellness rooms (sauna, massage, and cold plunge).
+BFS Gym is a gym membership and facility-access management API. The gym offers a gym floor, swimming pool, fitness classes, personal training sessions, and VIP wellness rooms (sauna, massage, and cold plunge).
 
 This repository is a proof-of-concept monolithic REST API. It demonstrates object-oriented analysis and design, domain business rules, architectural patterns, and automated testing. It is not a complete production gym-management system.
 
@@ -48,7 +48,7 @@ The business rules include membership plans with configurable booking windows an
 | **Factory Method** | `PaymentGatewayFactory.create(settings)` in `app/modules/memberships/payment_gateway.py` — payment provider factory | ✅ Implemented |
 | **Observer** | `NotificationPublisher` + Redis Pub/Sub + SSE endpoint — business events push notifications | 🔧 In progress |
 | **State** | `ActiveState`, `ExpiredState`, `CancelledState` in `app/modules/memberships/states.py` — membership lifecycle | ✅ Implemented |
-| **Builder** | `BookingContextBuilder` in `app/modules/bookings/builder.py` — assembles complex `BookingContext` | 🔧 In progress |
+| **Builder** | `BookingContextBuilder` in `app/modules/bookings/builder.py` — assembles complex `BookingContext` for Chain of Responsibility | ✅ Implemented |
 
 ## Architecture
 
@@ -57,6 +57,128 @@ The project follows a **monolithic MVC/REST architecture**:
 - **Models** (`app/models/`) — SQLAlchemy ORM models define the database schema.
 - **Services** (`app/modules/*/service.py`) — contain all business logic; routers never query the database directly.
 - **Routers/Controllers** (`app/modules/*/api_v1.py`) — FastAPI route handlers that validate requests, call services, and return responses.
+
+### Data Models & Entity Relationships
+
+The relational domain model is built on SQLAlchemy 2.0 with strict foreign key constraints, cascading policies, and uniqueness rules:
+
+```mermaid
+erDiagram
+    USER ||--o| MEMBER_PROFILE : "has profile (1:1)"
+    USER ||--o{ REFRESH_TOKEN : "issues (1:N)"
+    USER ||--o{ MEMBERSHIP : "purchases (1:N)"
+    USER ||--o{ BOOKING : "reserves (1:N)"
+    USER ||--o{ WAITLIST_ENTRY : "queues for (1:N)"
+    USER ||--o{ ACCESS_LOG : "records (1:N)"
+
+    MEMBERSHIP_PLAN ||--|{ PLAN_ENTITLEMENT : "defines (1:N)"
+    MEMBERSHIP_PLAN ||--o{ MEMBERSHIP : "specifies (1:N)"
+
+    TIMETABLE_SESSION ||--o{ BOOKING : "allocates (1:N)"
+    TIMETABLE_SESSION ||--o{ WAITLIST_ENTRY : "queues for (1:N)"
+    BOOKING ||--o{ WAITLIST_ENTRY : "manages (1:N)"
+
+    USER {
+        int id PK
+        string email UK
+        string password_hash
+        enum role "member | staff | manager"
+        boolean is_active
+    }
+    MEMBER_PROFILE {
+        int id PK
+        int user_id FK,UK "1:1 unique"
+        date date_of_birth
+        string biometric_image_key UK
+        string biometric_content_type
+        timestamp biometric_uploaded_at
+    }
+    MEMBERSHIP_PLAN {
+        int id PK
+        string name UK
+        int price_minor
+        string currency
+        int duration_days
+        int booking_window_days
+        int weekly_booking_limit
+        boolean is_active
+    }
+    PLAN_ENTITLEMENT {
+        int id PK
+        int plan_id FK
+        enum entitlement "gym_floor | class | pool | vip_area | etc"
+    }
+    MEMBERSHIP {
+        int id PK
+        int user_id FK
+        int plan_id FK
+        enum status "active | expired | cancelled"
+        date starts_on
+        date ends_on
+        string payment_reference UK
+    }
+    TIMETABLE_SESSION {
+        int id PK
+        string resource_name
+        enum resource_type "class | pool | personal_training"
+        timestamp starts_at
+        timestamp ends_at
+        int capacity
+        int allocated_count
+        int station_count
+    }
+    BOOKING {
+        int id PK
+        int user_id FK
+        int session_id FK "optional"
+        string resource_name
+        enum resource_type "class | pool | personal_training"
+        timestamp starts_at
+        timestamp ends_at "optional"
+        enum status "confirmed | cancelled | checked_in | no_show"
+    }
+    WAITLIST_ENTRY {
+        int id PK
+        int booking_id FK "optional"
+        int session_id FK "optional"
+        int user_id FK
+        enum status "waiting | offered | accepted | expired"
+        timestamp offered_at
+    }
+    ACCESS_LOG {
+        int id PK
+        int member_id FK
+        enum event "check_in | check_out | manual_check_in"
+        string zone
+        timestamp occurred_at
+        string source
+    }
+    REFRESH_TOKEN {
+        int id PK
+        int user_id FK
+        string token_hash UK
+        string jti UK
+        string family_id
+        timestamp expires_at
+        timestamp revoked_at
+    }
+```
+
+#### Key Relationships and Integrity Constraints
+
+| Parent Model | Relationship | Child Model | Foreign Key / Constraint | Cascade / On-Delete | Description |
+|---|---|---|---|---|---|
+| `User` | **1 : 1 (Optional)** | `MemberProfile` | `member_profiles.user_id` (Unique) | `RESTRICT` (orphan-removal in ORM) | One-to-one link storing date of birth and biometric photo keys for facial verification. |
+| `User` | **1 : N** | `RefreshToken` | `refresh_tokens.user_id` | `CASCADE` | Stores rotating JWT refresh tokens with family tracking and revocation. |
+| `User` | **1 : N** | `Membership` | `memberships.user_id` | `RESTRICT` | Tracks past, current, and renewed membership contracts per member. |
+| `User` | **1 : N** | `Booking` | `bookings.user_id` | `RESTRICT` | Active and historical facility reservations made by the member. |
+| `User` | **1 : N** | `WaitlistEntry` | `waitlist_entries.user_id` | `RESTRICT` | Tracks session waitlist positions requested by the member. |
+| `User` | **1 : N** | `AccessLog` | `access_logs.member_id` | `None` (Audit Log) | Immutable historical audit trail of turnstile check-ins and check-outs. |
+| `MembershipPlan` | **1 : N** | `PlanEntitlement` | `plan_entitlements.plan_id` | `CASCADE` (delete-orphan) | Defines feature privileges (e.g., VIP sauna access, pool bookings) granted by each plan tier. Unique on `(plan_id, entitlement)`. |
+| `MembershipPlan` | **1 : N** | `Membership` | `memberships.plan_id` | `RESTRICT` | Associates purchased memberships with their parent plan rules (pricing, booking window, weekly limits). |
+| `TimetableSession` | **1 : N** | `Booking` | `bookings.session_id` | `RESTRICT` | Links member bookings to scheduled classes, pool slots, or personal training blocks. |
+| `TimetableSession` | **1 : N** | `WaitlistEntry` | `waitlist_entries.session_id` | `RESTRICT` | Queue of members waiting for spots on full timetable sessions. Unique on `(session_id, user_id)`. |
+| `Booking` | **1 : N** | `WaitlistEntry` | `waitlist_entries.booking_id` | `RESTRICT` | Legacy queue linked directly to ad-hoc bookings. Unique on `(booking_id, user_id)`. |
 
 ## Why No External Cloud AI for Door Scanners
 
@@ -132,9 +254,9 @@ uv run ruff format --check .
 | Factory Method pattern | `app/modules/memberships/payment_gateway.py` |
 | Observer pattern | `app/modules/notifications/` *(in progress)* |
 | State pattern | `app/modules/memberships/states.py` |
-| Builder pattern | `app/modules/bookings/builder.py` *(in progress)* |
-| Automated tests | `tests/` directory |
-| CI/CD | `.github/workflows/ci.yml` (Lint active) |
-| Metrics + refactoring | Report added-value section *(planned)* |
+| Builder pattern | `app/modules/bookings/builder.py` |
+| Automated tests | `tests/` directory (Unit, Integration, and DB tests) |
+| CI/CD | `.github/workflows/ci.yml` (Lint, DB Integration Tests, Metrics) |
+| Metrics + refactoring | `BookingService.create` refactored (complexity 10 -> 2), Radon CI job |
 | AI Strategy extension (Feature A) | `docs/implementation-guide.md#optional-ai-features` *(Pydantic AI recommender)* |
 | AI Chain of Responsibility (Feature C) | `docs/implementation-guide.md#optional-ai-features` *(OpenCV photo quality check)* |

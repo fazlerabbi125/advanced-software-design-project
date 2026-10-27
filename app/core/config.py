@@ -1,12 +1,13 @@
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
+from typing import Final
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 from sqlalchemy import URL
 
-from app.utils.constants import (
+from app.shared.constants import (
     MAX_BIOMETRIC_IMAGE_BYTES,
     VIP_ROOM_CAPACITY,
 )
@@ -25,9 +26,9 @@ class Settings(BaseSettings):
     cache_redis_url: str
     jwt_access_secret_key: SecretStr
     jwt_refresh_secret_key: SecretStr
-    jwt_algorithm: str = "HS256"
-    jwt_issuer: str
-    jwt_audience: str
+    jwt_algorithm: Final[str] = "HS256"
+    jwt_issuer: str|None = None
+    jwt_audience: str|None = None
     jwt_access_expiration: int = int(timedelta(minutes=15).total_seconds())
     jwt_refresh_expiration: int = int(timedelta(weeks=3).total_seconds())
     cors_allow_origins: list[str] = Field(default_factory=list)
@@ -43,8 +44,8 @@ class Settings(BaseSettings):
     stripe_secret_key: SecretStr
     stripe_webhook_secret: SecretStr
     # URLs Stripe redirects the member to after checkout completes or is abandoned.
-    stripe_success_url: str = "http://localhost:8000/docs#/memberships/purchase_membership"
-    stripe_cancel_url: str = "http://localhost:8000/docs#/memberships/purchase_membership"
+    stripe_success_url: str = ""
+    stripe_cancel_url: str = ""
 
     @property
     def sqlalchemy_url(self) -> URL:

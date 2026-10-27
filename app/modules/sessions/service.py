@@ -3,9 +3,9 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.sessions import TimetableSession
+from app.models.timetable_sessions import TimetableSession
 from app.modules.sessions.schemas import CreateSessionRequest
-from app.utils.helpers import utc_now
+from app.shared.helpers import utc_now
 
 
 class TimetableService:
