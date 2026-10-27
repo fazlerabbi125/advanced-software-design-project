@@ -50,3 +50,7 @@ class TimetableSession(Base, IdMixin, TimestampMixin):
     @property
     def spots_left(self) -> int:
         return self.capacity - self.allocated_count
+
+    @property
+    def is_full(self) -> bool:
+        return self.allocated_count >= self.capacity
