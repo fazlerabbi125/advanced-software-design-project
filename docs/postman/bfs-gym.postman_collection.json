@@ -218,6 +218,45 @@
           }
         }
       ]
+    },
+    {
+      "name": "Manager",
+      "item": [
+        {
+          "name": "All plans, including off sale",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/memberships/plans/all"
+          }
+        },
+        {
+          "name": "Create plan",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Student\",\n  \"price_minor\": 2500,\n  \"currency\": \"EUR\",\n  \"duration_days\": 30,\n  \"booking_window_days\": 2,\n  \"weekly_booking_limit\": 4,\n  \"entitlements\": [\"gym_floor_access\", \"class_booking\"]\n}" },
+            "url": "{{baseUrl}}/memberships/plans"
+          }
+        },
+        {
+          "name": "Update plan",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"weekly_booking_limit\": 6,\n  \"entitlements\": [\"gym_floor_access\", \"class_booking\", \"pool_booking\"]\n}" },
+            "url": "{{baseUrl}}/memberships/plans/4"
+          }
+        },
+        {
+          "name": "Take plan off sale",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/memberships/plans/4"
+          }
+        }
+      ]
     }
   ]
 }
