@@ -57,5 +57,7 @@ POOL_OFFER_CUTOFF_MINUTES = 15
 CHECK_IN_GRACE_MINUTES = 10
 # Check-in to a booked session opens this many minutes before the session starts.
 CHECK_IN_OPENS_MINUTES = 15
+# A member may book this many slots of one equipment type (e.g. squat racks) per day.
+MAX_EQUIPMENT_SLOTS_PER_TYPE_PER_DAY = 2
 # How often the scheduler expires offers and looks for no-shows.
 BOOKING_JOBS_INTERVAL_SECONDS = 60

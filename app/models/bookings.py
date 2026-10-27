@@ -26,6 +26,7 @@ class BookingResourceType(StrEnum):
     CLASS = "class"
     POOL = "pool"
     PERSONAL_TRAINING = "personal_training"
+    EQUIPMENT = "equipment"
 
 
 class WaitlistStatus(StrEnum):

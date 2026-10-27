@@ -13,12 +13,18 @@ from datetime import UTC, datetime, timedelta
 
 from app.models.bookings import Booking, BookingResourceType, BookingStatus
 from app.models.memberships import Membership, MembershipEntitlement, MembershipStatus
-from app.shared.constants import NO_SHOW_PENALTY_DAYS, NO_SHOW_PENALTY_LIMIT
+from app.shared.constants import (
+    MAX_EQUIPMENT_SLOTS_PER_TYPE_PER_DAY,
+    NO_SHOW_PENALTY_DAYS,
+    NO_SHOW_PENALTY_LIMIT,
+)
 
 REQUIRED_ENTITLEMENTS = {
     BookingResourceType.CLASS: MembershipEntitlement.CLASS_BOOKING,
     BookingResourceType.POOL: MembershipEntitlement.POOL_BOOKING,
     BookingResourceType.PERSONAL_TRAINING: MembershipEntitlement.PERSONAL_TRAINING,
+    # Every plan includes the gym floor, and with it the equipment there.
+    BookingResourceType.EQUIPMENT: MembershipEntitlement.GYM_FLOOR_ACCESS,
 }
 
 
@@ -42,6 +48,9 @@ class BookingContext:
     membership: Membership | None
     bookings: Sequence[Booking]
     has_unresolved_no_shows: bool = False
+    # Equipment slots only: how many slots of this equipment type the member already
+    # holds on the session's day.
+    equipment_slots_that_day: int = 0
 
 
 def week_bounds(starts_at: datetime) -> tuple[datetime, datetime]:
@@ -148,6 +157,20 @@ class NoShowPenaltyRule(EligibilityRule):
         return None
 
 
+class EquipmentDailyCapRule(EligibilityRule):
+    def check(self, context: BookingContext) -> EligibilityFailure | None:
+        if (
+            context.resource_type == BookingResourceType.EQUIPMENT
+            and context.equipment_slots_that_day >= MAX_EQUIPMENT_SLOTS_PER_TYPE_PER_DAY
+        ):
+            return EligibilityFailure(
+                "equipment_daily_cap",
+                f"you can book {MAX_EQUIPMENT_SLOTS_PER_TYPE_PER_DAY} slots of this equipment "
+                "type per day",
+            )
+        return None
+
+
 DEFAULT_RULES = (
     FutureSessionRule,
     ActiveMembershipRule,
@@ -155,6 +178,7 @@ DEFAULT_RULES = (
     BookingWindowRule,
     WeeklyLimitRule,
     SameStartRule,
+    EquipmentDailyCapRule,
     NoShowPenaltyRule,
 )
 
