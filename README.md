@@ -27,7 +27,7 @@ The business rules include membership plans with configurable booking windows an
 
 - JWT authentication (access + refresh tokens) with member, staff, and manager roles.
 - Membership plans (Basic, Standard, Premium) with entitlement-based access control.
-- Stripe Checkout payment integration (sandbox mode) with webhook-based membership activation.
+- Stripe Checkout gateway (sandbox mode) and a verified webhook-receipt endpoint; membership activation remains pending webhook lifecycle work.
 - Booking creation, listing, cancellation, and eligibility feedback (active membership, plan entitlement, booking window, weekly limit, same-start conflict checks).
 - VIP occupancy tracking, automatic waiting lists, and visit expiry using Redis sorted sets.
 - Scanner/device check-in with configurable device keys and zone-specific access policies.
@@ -190,7 +190,7 @@ Application-level AI extensions (such as **Pydantic AI** for workout recommendat
 
 Celery was originally added as a notification queue placeholder, but it is not needed:
 
-- **Stripe webhooks** are processed synchronously inside the FastAPI webhook endpoint — no background queue is needed.
+- **Stripe webhooks** are signature-verified synchronously inside the FastAPI endpoint — no background queue is needed. Membership activation will be added with the pending-payment lifecycle.
 - **In-app notifications** are delivered via Redis Pub/Sub + Server-Sent Events (SSE) — this is instant push delivery; a queue would only add latency.
 - **Periodic background jobs** (waitlist expiry, no-show detection) are handled by APScheduler, which runs inside the FastAPI process with no extra Docker service or infrastructure.
 
@@ -224,10 +224,17 @@ The `migrate` service applies the schema before the API starts. Swagger is avail
 To test payments locally, start the Stripe CLI sidecar:
 
 ```powershell
-docker compose --env-file .env.docker --profile stripe up
+docker compose --env-file .env.docker --profile stripe up -d --build
+docker compose --env-file .env.docker --profile stripe logs -f stripe-listener
 ```
 
-After it starts, copy the `whsec_...` signing secret from the `stripe-listener` container logs into `STRIPE_WEBHOOK_SECRET` in `.env.docker`, then restart the `api` service.
+After it starts, copy the `whsec_...` signing secret from the `stripe-listener` container logs into `STRIPE_WEBHOOK_SECRET` in `.env.docker`, then recreate the API container so it receives the new environment value:
+
+```powershell
+docker compose --env-file .env.docker up -d --force-recreate api
+```
+
+The current webhook endpoint verifies and logs received Stripe events only. It does not activate memberships yet.
 
 To apply a new migration:
 
