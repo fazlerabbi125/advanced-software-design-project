@@ -265,7 +265,7 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
         rows = {
             status: Booking(
                 user_id=member,
-                session_id=session.id,
+                timetable_session_id=session.id,
                 resource_name=f"{status} class",
                 resource_type=CLASS,
                 starts_at=NOW,
@@ -277,7 +277,7 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
         }
         late = Booking(
             user_id=member,
-            session_id=session.id,
+            timetable_session_id=session.id,
             resource_name="Booked after the start",
             resource_type=CLASS,
             starts_at=NOW,
@@ -320,7 +320,7 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
         await self.add(
             Booking(
                 user_id=ann,
-                session_id=lane.id,
+                timetable_session_id=lane.id,
                 resource_name=lane.resource_name,
                 resource_type=POOL,
                 starts_at=lane.starts_at,
@@ -340,7 +340,7 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
             await self.add(
                 Booking(
                     user_id=member,
-                    session_id=missed.id,
+                    timetable_session_id=missed.id,
                     resource_name=missed.resource_name,
                     resource_type=CLASS,
                     starts_at=missed.starts_at,

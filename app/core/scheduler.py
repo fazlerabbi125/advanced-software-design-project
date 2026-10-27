@@ -1,7 +1,7 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.modules.bookings.jobs import run_no_show_detection, run_offer_expiry
-from app.utils.constants import BOOKING_JOBS_INTERVAL_SECONDS
+from app.shared.constants import BOOKING_JOBS_INTERVAL_SECONDS
 
 
 def create_scheduler() -> AsyncIOScheduler:

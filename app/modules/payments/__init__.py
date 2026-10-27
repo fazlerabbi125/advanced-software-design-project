@@ -1,0 +1,1 @@
+"""Payment-provider HTTP endpoints."""

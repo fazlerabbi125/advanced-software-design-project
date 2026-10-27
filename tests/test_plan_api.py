@@ -1,6 +1,7 @@
 import os
 import unittest
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -8,7 +9,7 @@ from fastapi.testclient import TestClient
 from app.models.auth import User, UserRole
 from app.models.memberships import MembershipEntitlement, MembershipPlan, PlanEntitlement
 from app.modules.memberships.service import PlanNameTakenError, PlanNotFoundError
-from app.utils.constants import (
+from app.shared.constants import (
     MAX_BOOKING_WINDOW_DAYS,
     MAX_PLAN_DURATION_DAYS,
     MAX_PLAN_PRICE_MINOR,
@@ -71,7 +72,7 @@ class PlanManagementApiTests(unittest.TestCase):
         self.service = AsyncMock()
         self.service.create_plan.return_value = stored_plan()
         self.service.update_plan.return_value = stored_plan(weekly_booking_limit=6)
-        self.current_user = User(id=1, role=UserRole.MANAGER)
+        self.current_user = User(id=uuid4(), role=UserRole.MANAGER)
         app = FastAPI()
         app.include_router(router)
         app.dependency_overrides[get_current_user] = lambda: self.current_user
@@ -101,7 +102,7 @@ class PlanManagementApiTests(unittest.TestCase):
     def test_staff_and_members_cannot_manage_plans(self):
         for role in (UserRole.STAFF, UserRole.MEMBER):
             with self.subTest(role=role):
-                self.current_user = User(id=2, role=role)
+                self.current_user = User(id=uuid4(), role=role)
                 requests = (
                     self.client.post("/memberships/plans", json=NEW_PLAN),
                     self.client.patch("/memberships/plans/4", json={"price_minor": 1}),

@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
@@ -18,7 +18,7 @@ async def upload_biometric_image(
     current_user: CurrentUser,
     service: MemberServiceDependency,
     image: Annotated[UploadFile, File()],
-) -> BiometricImageResponse:
+) -> Any:
     try:
         profile = await service.upload_biometric_image(
             current_user.id,
@@ -28,8 +28,4 @@ async def upload_biometric_image(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
         ) from error
-    return BiometricImageResponse(
-        image_key=profile.biometric_image_key or "",
-        content_type=profile.biometric_content_type or "",
-        uploaded_at=profile.biometric_uploaded_at or profile.created_at,
-    )
+    return profile

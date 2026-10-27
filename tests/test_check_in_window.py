@@ -3,7 +3,7 @@ from datetime import timedelta
 
 from app.models.bookings import Booking, BookingStatus
 from app.modules.bookings.service import check_in_deadline, check_in_problem
-from app.utils.constants import CHECK_IN_GRACE_MINUTES, CHECK_IN_OPENS_MINUTES
+from app.shared.constants import CHECK_IN_GRACE_MINUTES, CHECK_IN_OPENS_MINUTES
 from tests.test_booking_eligibility import NOW
 
 

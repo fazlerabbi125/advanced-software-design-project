@@ -3,11 +3,12 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
+from uuid import UUID
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String
+from sqlalchemy import DateTime, Enum, ForeignKey, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, IdMixin, TimestampMixin
+from app.models.base import Base, IdMixin, TimestampMixin, enum_values
 
 if TYPE_CHECKING:
     from app.models.auth import User
@@ -29,15 +30,25 @@ class AccessZone(enum.StrEnum):
 class AccessLog(IdMixin, TimestampMixin, Base):
     __tablename__ = "access_logs"
 
-    member_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    event: Mapped[AccessEvent] = mapped_column(
-        Enum(AccessEvent, name="access_event", native_enum=False, create_constraint=True)
+    member_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
-    zone: Mapped[str] = mapped_column(String(100), default="gym_floor")
+    event: Mapped[AccessEvent] = mapped_column(
+        Enum(
+            AccessEvent,
+            name="access_event",
+            native_enum=False,
+            create_constraint=True,
+            values_callable=enum_values,
+        )
+    )
+    zone: Mapped[str] = mapped_column(String(150), default=AccessZone.GYM_FLOOR.value)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     source: Mapped[str] = mapped_column(String(50), default="biometric")
     # Set only for manual check-ins: the staff member who let the member in, and why.
-    performed_by_staff_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), index=True)
+    performed_by_staff_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     staff_reason: Mapped[str | None] = mapped_column(String(255))
 
     user: Mapped[User] = relationship(back_populates="access_logs", foreign_keys=[member_id])

@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.utils.helpers import utc_now
+from app.shared.helpers import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def group_validation_errors(exception: RequestValidationError) -> ValidationErro
     for error in exception.errors():
         location = error.get("loc", ())
         source = str(location[0]) if location else "body"
-        field = ".".join(str(part) for part in location[1:]) or "__root__"
+        field = ".".join(str(part) for part in location[1:]) or ""
         errors.setdefault(source, {}).setdefault(field, []).append(str(error["msg"]))
     return errors
 

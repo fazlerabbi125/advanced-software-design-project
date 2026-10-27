@@ -2,6 +2,7 @@ import os
 import unittest
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -38,7 +39,8 @@ class WaitlistApiTests(unittest.TestCase):
         self.service = AsyncMock()
         app = FastAPI()
         app.include_router(router)
-        app.dependency_overrides[get_current_user] = lambda: User(id=7)
+        self.current_user_id = uuid4()
+        app.dependency_overrides[get_current_user] = lambda: User(id=self.current_user_id)
         app.dependency_overrides[get_booking_service] = lambda: self.service
         self.client = TestClient(app)
 
@@ -46,7 +48,7 @@ class WaitlistApiTests(unittest.TestCase):
         session = timetable_session()
         self.service.accept_offer.return_value = Booking(
             id=3,
-            session_id=1,
+            timetable_session_id=1,
             resource_name=session.resource_name,
             resource_type=session.resource_type,
             starts_at=session.starts_at,
@@ -58,7 +60,7 @@ class WaitlistApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["status"], "confirmed")
-        self.service.accept_offer.assert_awaited_once_with(7, 5)
+        self.service.accept_offer.assert_awaited_once_with(self.current_user_id, 5)
 
     def test_accept_errors(self):
         failure = BookingEligibilityError([EligibilityFailure("weekly_limit", "limit reached")])

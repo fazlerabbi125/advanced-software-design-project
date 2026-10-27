@@ -1,7 +1,6 @@
 from datetime import UTC, datetime, timedelta
-from hashlib import sha256
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import jwt
 from jwt.exceptions import InvalidTokenError
@@ -20,22 +19,21 @@ def verify_password(password: str, password_hash: str) -> bool:
     return password_hasher.verify(password, password_hash)
 
 
-def hash_token(token: str) -> str:
-    return sha256(token.encode()).hexdigest()
-
-
-def create_access_token(subject: int, role: str) -> str:
+def create_access_token(subject: UUID, role: str) -> str:
     settings = get_settings()
     now = datetime.now(UTC)
     payload = {
         "sub": str(subject),
         "role": role,
         "type": "access",
-        "iss": settings.jwt_issuer,
-        "aud": settings.jwt_audience,
         "iat": now,
         "exp": now + timedelta(seconds=settings.jwt_access_expiration),
     }
+    if settings.jwt_issuer is not None:
+        payload["iss"] = settings.jwt_issuer
+    if settings.jwt_audience is not None:
+        payload["aud"] = settings.jwt_audience
+
     return jwt.encode(
         payload,
         settings.jwt_access_secret_key.get_secret_value(),
@@ -44,7 +42,7 @@ def create_access_token(subject: int, role: str) -> str:
 
 
 def create_refresh_token(
-    subject: int, family_id: str | None = None
+    subject: UUID, family_id: str | None = None
 ) -> tuple[str, str, str, datetime]:
     settings = get_settings()
     now = datetime.now(UTC)
@@ -55,11 +53,14 @@ def create_refresh_token(
         "jti": jti,
         "family": family_id or str(uuid4()),
         "type": "refresh",
-        "iss": settings.jwt_issuer,
-        "aud": settings.jwt_audience,
         "iat": now,
         "exp": expires_at,
     }
+    if settings.jwt_issuer is not None:
+        payload["iss"] = settings.jwt_issuer
+    if settings.jwt_audience is not None:
+        payload["aud"] = settings.jwt_audience
+
     token = jwt.encode(
         payload,
         settings.jwt_refresh_secret_key.get_secret_value(),

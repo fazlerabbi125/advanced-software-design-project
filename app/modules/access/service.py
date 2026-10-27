@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Mapping
+from uuid import UUID
 
 from redis.exceptions import RedisError
 from sqlalchemy import select
@@ -11,7 +12,7 @@ from app.models.auth import User
 from app.modules.access.occupancy import ZoneOccupancy, get_zone_occupancy
 from app.modules.access.policies import AccessDeniedError, AccessPolicy, build_policies
 from app.modules.memberships.service import MembershipService
-from app.utils.helpers import utc_now
+from app.shared.helpers import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +35,11 @@ class AccessService:
 
     async def check_in(
         self,
-        member_id: int,
+        member_id: UUID,
         zone: AccessZone,
         source: str = "biometric",
         event: AccessEvent = AccessEvent.CHECK_IN,
-        staff_id: int | None = None,
+        staff_id: UUID | None = None,
         reason: str | None = None,
     ) -> AccessLog:
         if event == AccessEvent.MANUAL_CHECK_IN and (staff_id is None or not reason):
@@ -75,7 +76,7 @@ class AccessService:
         await self.session.refresh(access_log)
         return access_log
 
-    async def check_out(self, member_id: int, zone: AccessZone) -> AccessLog:
+    async def check_out(self, member_id: UUID, zone: AccessZone) -> AccessLog:
         access_log = AccessLog(
             member_id=member_id,
             event=AccessEvent.CHECK_OUT,
@@ -88,22 +89,22 @@ class AccessService:
         await self.release_place(member_id, zone)
         return access_log
 
-    async def release_place(self, member_id: int, zone: AccessZone) -> None:
+    async def release_place(self, member_id: UUID, zone: AccessZone) -> None:
         try:
             await self.occupancy.leave(zone.value, member_id)
         except RedisError:
             logger.exception("Unable to update occupancy for zone %s", zone.value)
 
-    async def waitlist_position(self, member_id: int, zone: AccessZone) -> int | None:
+    async def waitlist_position(self, member_id: UUID, zone: AccessZone) -> int | None:
         return await self.occupancy.waitlist_position(zone.value, member_id)
 
-    async def leave_waitlist(self, member_id: int, zone: AccessZone) -> None:
+    async def leave_waitlist(self, member_id: UUID, zone: AccessZone) -> None:
         await self.occupancy.leave_waitlist(zone.value, member_id)
 
     async def current_occupancy(self) -> dict[str, int]:
         return {zone.value: await self.occupancy.count(zone.value) for zone in AccessZone}
 
-    async def list_member_access(self, member_id: int) -> list[AccessLog]:
+    async def list_member_access(self, member_id: UUID) -> list[AccessLog]:
         result = await self.session.scalars(
             select(AccessLog)
             .where(AccessLog.member_id == member_id)

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from enum import Enum
 
 from sqlalchemy import DateTime, func
 from sqlalchemy.ext.asyncio import AsyncAttrs
@@ -23,3 +24,10 @@ class TimestampMixin:
         onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
+
+ASYNC_CASCADE = "save-update, merge, expunge, delete, delete-orphan"
+
+
+def enum_values(enum_class: type[Enum]) -> list[str]:
+    """Persist enum values rather than their Python member names."""
+    return [str(member.value) for member in enum_class]

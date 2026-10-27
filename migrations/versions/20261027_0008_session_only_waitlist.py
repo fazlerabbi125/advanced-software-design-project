@@ -5,8 +5,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20261027_0007"
-down_revision: str | None = "20261026_0006"
+revision: str = "20261027_0008"
+down_revision: str | None = "20261027_0007"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
@@ -34,7 +34,7 @@ def downgrade() -> None:
         "bookings",
         ["booking_id"],
         ["id"],
-        ondelete="RESTRICT",
+        ondelete="CASCADE",
     )
     op.create_unique_constraint(
         "uq_waitlist_entries_booking_id", "waitlist_entries", ["booking_id", "user_id"]

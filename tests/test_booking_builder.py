@@ -1,12 +1,13 @@
 import unittest
 from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 from app.models.bookings import BookingResourceType
-from app.models.sessions import TimetableSession
+from app.models.timetable_sessions import TimetableSession
 from app.modules.bookings.builder import BookingContextBuilder
 from app.modules.bookings.eligibility import build_eligibility_chain
-from app.utils.constants import NO_SHOW_PENALTY_LIMIT
+from app.shared.constants import NO_SHOW_PENALTY_LIMIT
 from tests.test_booking_eligibility import NOW, booking, membership
 
 
@@ -41,7 +42,7 @@ def fake_memberships(member):
 
 class BookingContextBuilderTests(unittest.IsolatedAsyncioTestCase):
     async def build(self, db, member, slot):
-        builder = BookingContextBuilder(db, user_id=1, now=NOW).with_session(slot)
+        builder = BookingContextBuilder(db, user_id=uuid4(), now=NOW).with_session(slot)
         await builder.with_membership(fake_memberships(member))
         await builder.with_weekly_bookings()
         await builder.with_no_show_penalties()
@@ -79,11 +80,11 @@ class BookingContextBuilderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_refuses_to_build_without_required_steps(self):
         with self.assertRaisesRegex(ValueError, "without a session"):
-            BookingContextBuilder(fake_db(), 1, NOW).build()
+            BookingContextBuilder(fake_db(), uuid4(), NOW).build()
         with self.assertRaisesRegex(ValueError, "set the session"):
-            await BookingContextBuilder(fake_db(), 1, NOW).with_weekly_bookings()
+            await BookingContextBuilder(fake_db(), uuid4(), NOW).with_weekly_bookings()
         with self.assertRaisesRegex(ValueError, "membership"):
-            BookingContextBuilder(fake_db(), 1, NOW).with_session(timetable_session()).build()
+            BookingContextBuilder(fake_db(), uuid4(), NOW).with_session(timetable_session()).build()
 
 
 if __name__ == "__main__":

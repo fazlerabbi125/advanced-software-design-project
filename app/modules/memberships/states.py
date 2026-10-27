@@ -76,6 +76,19 @@ class ExpiredState(MembershipState):
         return RenewalTerms(starts_on=today, ends_on=today + timedelta(days=duration_days - 1))
 
 
+
+class PendingState(MembershipState):
+    status = MembershipStatus.PENDING
+
+    def cancel(self, membership: Membership) -> None:
+        membership.status = MembershipStatus.CANCELLED
+
+    def renewal_terms(
+        self, membership: Membership, duration_days: int, today: date
+    ) -> RenewalTerms:
+        raise MembershipActionError("A pending membership cannot be renewed")
+
+
 class CancelledState(MembershipState):
     status = MembershipStatus.CANCELLED
 
@@ -93,13 +106,15 @@ class CancelledState(MembershipState):
 ACTIVE = ActiveState()
 EXPIRED = ExpiredState()
 CANCELLED = CancelledState()
-
+PENDING = PendingState()
 
 def state_of(membership: Membership, today: date) -> MembershipState:
     """The membership's current state. A membership past its end date counts as
     expired even if the database row still says active."""
     if membership.status == MembershipStatus.CANCELLED:
         return CANCELLED
+    if membership.status == MembershipStatus.PENDING:
+        return PENDING
     if membership.status == MembershipStatus.EXPIRED or membership.ends_on < today:
         return EXPIRED
     return ACTIVE

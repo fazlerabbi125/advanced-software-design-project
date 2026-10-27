@@ -5,14 +5,16 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20261026_0006"
-down_revision: str | None = "20261026_0005"
+revision: str = "20261027_0007"
+down_revision: str | None = "20261027_0006"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column("access_logs", sa.Column("performed_by_staff_id", sa.Integer(), nullable=True))
+    op.add_column(
+        "access_logs", sa.Column("performed_by_staff_id", sa.Uuid(as_uuid=True), nullable=True)
+    )
     op.add_column("access_logs", sa.Column("staff_reason", sa.String(length=255), nullable=True))
     op.create_foreign_key(
         op.f("fk_access_logs_performed_by_staff_id_users"),
@@ -20,6 +22,7 @@ def upgrade() -> None:
         "users",
         ["performed_by_staff_id"],
         ["id"],
+        ondelete="SET NULL",
     )
     op.create_index(
         op.f("ix_access_logs_performed_by_staff_id"),

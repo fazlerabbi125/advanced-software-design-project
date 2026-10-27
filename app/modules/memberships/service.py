@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -66,7 +67,7 @@ class MembershipService:
         self.session = session
         self.payment_gateway = payment_gateway
 
-    async def list_for_user(self, user_id: int) -> list[Membership]:
+    async def list_for_user(self, user_id: UUID) -> list[Membership]:
         statement = (
             select(Membership)
             .where(Membership.user_id == user_id)
@@ -181,7 +182,7 @@ class MembershipService:
             await self.session.rollback()
             raise PlanNameTakenError("a plan with this name already exists") from error
 
-    async def purchase(self, user_id: int, plan_id: int) -> PurchaseResult:
+    async def purchase(self, user_id: UUID, plan_id: int) -> PurchaseResult:
         if self.payment_gateway is None:
             raise RuntimeError("MembershipService was created without a payment gateway")
 
@@ -223,7 +224,7 @@ class MembershipService:
         await self.session.refresh(membership)
         return PurchaseResult(membership=membership, plan=plan, payment=payment)
 
-    async def latest_membership(self, user_id: int) -> Membership | None:
+    async def latest_membership(self, user_id: UUID) -> Membership | None:
         statement = (
             select(Membership)
             .where(Membership.user_id == user_id)
@@ -233,7 +234,7 @@ class MembershipService:
         )
         return await self.session.scalar(statement)
 
-    async def cancel(self, user_id: int) -> Membership:
+    async def cancel(self, user_id: UUID) -> Membership:
         """Cancel the member's latest membership, if its current state allows it."""
         await self.lock_member(user_id)
         membership = await self.latest_membership(user_id)
@@ -249,7 +250,7 @@ class MembershipService:
         await self.session.refresh(membership)
         return membership
 
-    async def renew(self, user_id: int) -> PurchaseResult:
+    async def renew(self, user_id: UUID) -> PurchaseResult:
         """Renew the member's latest membership on the same plan.
 
         What a renewal does depends on the membership's state (see states.py).
@@ -288,12 +289,11 @@ class MembershipService:
         await self.session.refresh(membership)
         return PurchaseResult(membership=membership, plan=plan, payment=payment)
 
-    async def lock_member(self, user_id: int) -> None:
+    async def lock_member(self, user_id: UUID) -> None:
         # Lock this member's row until the transaction ends, so two changes to the
         # same member's membership run one after the other.
         await self.session.execute(select(User.id).where(User.id == user_id).with_for_update())
-
-    async def booking_membership(self, user_id: int, on_date: date) -> Membership | None:
+    async def booking_membership(self, user_id: UUID, on_date: date) -> Membership | None:
         """Load the current membership and its plan rules without lazy database access."""
         return await self.session.scalar(
             select(Membership)
@@ -308,7 +308,7 @@ class MembershipService:
             .limit(1)
         )
 
-    async def has_active_membership(self, user_id: int, on_date: date | None = None) -> bool:
+    async def has_active_membership(self, user_id: UUID, on_date: date | None = None) -> bool:
         active_date = on_date or datetime.now(UTC).date()
         statement = select(Membership.id).where(
             Membership.user_id == user_id,
@@ -320,7 +320,7 @@ class MembershipService:
 
     async def has_entitlement(
         self,
-        user_id: int,
+        user_id: UUID,
         entitlement: MembershipEntitlement,
         on_date: date | None = None,
     ) -> bool:

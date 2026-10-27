@@ -155,7 +155,7 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_booking_takes_a_place_and_cancelling_gives_it_back(self):
         session_id = await self.add_session()
         booking = await self.book(session_id)
-        self.assertEqual(booking.session_id, session_id)
+        self.assertEqual(booking.timetable_session_id, session_id)
         self.assertEqual(await self.allocated(session_id), 1)
         async with self.sessions() as session:
             await BookingService(session).cancel(self.user_id, booking.id)

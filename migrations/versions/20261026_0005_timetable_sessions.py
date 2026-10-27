@@ -103,7 +103,9 @@ def downgrade() -> None:
         "ck_bookings_booking_status", "bookings", "status IN ('CONFIRMED', 'CANCELLED')"
     )
     op.drop_index("ix_bookings_session_id", table_name="bookings")
-    op.drop_constraint("fk_bookings_session_id_sessions", "bookings", type_="foreignkey")
+    op.drop_constraint(
+        "fk_bookings_session_id_sessions", "bookings", type_="foreignkey"
+    )
     op.drop_column("bookings", "ends_at")
     op.drop_column("bookings", "session_id")
 

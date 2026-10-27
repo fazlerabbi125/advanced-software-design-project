@@ -12,9 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bookings import Booking, BookingStatus, WaitlistEntry, WaitlistStatus
-from app.models.sessions import TimetableSession
+from app.models.timetable_sessions import TimetableSession
 from app.modules.bookings.service import BookingService, check_in_deadline, offer_deadline
-from app.utils.helpers import utc_now
+from app.shared.helpers import utc_now
 
 
 async def _lock_session(db: AsyncSession, session_id: int) -> TimetableSession | None:
@@ -79,9 +79,9 @@ async def detect_no_shows(db: AsyncSession, now: datetime) -> int:
     """
     candidates = (
         await db.execute(
-            select(Booking.id, Booking.session_id).where(
+            select(Booking.id, Booking.timetable_session_id).where(
                 Booking.status == BookingStatus.CONFIRMED,
-                Booking.session_id.is_not(None),
+                Booking.timetable_session_id.is_not(None),
                 Booking.starts_at <= now,
             )
         )

@@ -16,7 +16,7 @@ from app.models.memberships import (
     MembershipStatus,
     PlanEntitlement,
 )
-from app.models.sessions import TimetableSession
+from app.models.timetable_sessions import TimetableSession
 
 __all__ = [
     "AccessEvent",

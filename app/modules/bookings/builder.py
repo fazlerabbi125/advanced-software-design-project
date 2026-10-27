@@ -11,24 +11,25 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Self
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bookings import Booking, BookingStatus
 from app.modules.bookings.eligibility import BookingContext, week_bounds
-from app.utils.constants import NO_SHOW_PENALTY_DAYS, NO_SHOW_PENALTY_LIMIT
+from app.shared.constants import NO_SHOW_PENALTY_DAYS, NO_SHOW_PENALTY_LIMIT
 
 if TYPE_CHECKING:
     from app.models.memberships import Membership
-    from app.models.sessions import TimetableSession
+    from app.models.timetable_sessions import TimetableSession
     from app.modules.memberships.service import MembershipService
 
 
 class BookingContextBuilder:
     """Fluent builder for the immutable BookingContext used by the eligibility chain."""
 
-    def __init__(self, db: AsyncSession, user_id: int, now: datetime) -> None:
+    def __init__(self, db: AsyncSession, user_id: UUID, now: datetime) -> None:
         self.db = db
         self.user_id = user_id
         self.now = now

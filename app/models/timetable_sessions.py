@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, IdMixin, TimestampMixin
+from app.models.base import Base, IdMixin, TimestampMixin, enum_values
 from app.models.bookings import BookingResourceType
 
 if TYPE_CHECKING:
@@ -20,14 +20,14 @@ class TimetableSession(Base, IdMixin, TimestampMixin):
     SQLAlchemy database session used everywhere in the services.
     """
 
-    __tablename__ = "sessions"
+    __tablename__ = "timetable_sessions"
     __table_args__ = (
-        sa.CheckConstraint("capacity > 0", name="ck_sessions_capacity_positive"),
+        sa.CheckConstraint("capacity > 0", name="ck_timetable_sessions_capacity_positive"),
         sa.CheckConstraint(
             "allocated_count >= 0 AND allocated_count <= capacity",
-            name="ck_sessions_allocated_within_capacity",
+            name="ck_timetable_sessions_allocated_within_capacity",
         ),
-        sa.CheckConstraint("ends_at > starts_at", name="ck_sessions_ends_after_start"),
+        sa.CheckConstraint("ends_at > starts_at", name="ck_timetable_sessions_ends_after_start"),
     )
 
     resource_name: Mapped[str] = mapped_column(sa.String(150), index=True)
@@ -37,6 +37,7 @@ class TimetableSession(Base, IdMixin, TimestampMixin):
             name="booking_resource_type",
             native_enum=False,
             create_constraint=True,
+            values_callable=enum_values,
         )
     )
     starts_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), index=True)
