@@ -123,6 +123,7 @@ class PurchaseResponse(BaseModel):
     amount_minor: int
     currency: str
     payment_reference: str
+    checkout_url: str | None
 
     @model_validator(mode="before")
     @classmethod
@@ -135,4 +136,5 @@ class PurchaseResponse(BaseModel):
             "amount_minor": value.payment.amount_minor,
             "currency": value.payment.currency,
             "payment_reference": value.payment.reference,
+            "checkout_url": value.payment.checkout_url,
         }

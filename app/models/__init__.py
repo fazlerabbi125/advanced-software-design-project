@@ -15,6 +15,7 @@ from app.models.memberships import (
     MembershipPlan,
     MembershipStatus,
     PlanEntitlement,
+    StripeEvent,
 )
 from app.models.timetable_sessions import TimetableSession
 
@@ -32,6 +33,7 @@ __all__ = [
     "MembershipPlan",
     "MembershipStatus",
     "PlanEntitlement",
+    "StripeEvent",
     "RefreshToken",
     "TimetableSession",
     "IdMixin",

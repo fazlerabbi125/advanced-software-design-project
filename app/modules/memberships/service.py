@@ -27,6 +27,10 @@ class ActiveMembershipExistsError(ValueError):
     pass
 
 
+class PendingMembershipExistsError(ValueError):
+    pass
+
+
 class PaymentDeclinedError(ValueError):
     pass
 
@@ -128,7 +132,7 @@ class MembershipService:
             entitlements=[PlanEntitlement(entitlement=item) for item in sorted(entitlements)],
         )
         self.session.add(plan)
-        await self.commit_plan_change()
+        await self._flush_plan_change()
         return await self.get_plan(plan.id)
 
     async def update_plan(
@@ -158,14 +162,13 @@ class MembershipService:
                     plan.entitlements.remove(entry)
             for entitlement in sorted(entitlements - current.keys()):
                 plan.entitlements.append(PlanEntitlement(entitlement=entitlement))
-        await self.commit_plan_change()
+        await self._flush_plan_change()
         return await self.get_plan(plan.id)
 
     async def deactivate_plan(self, plan_id: int) -> None:
         """Take a plan off sale. Current members keep it until it ends; it cannot be renewed."""
         plan = await self.get_plan(plan_id)
         plan.is_active = False
-        await self.session.commit()
 
     async def ensure_plan_name_free(self, name: str, ignore_plan_id: int | None = None) -> None:
         statement = select(MembershipPlan.id).where(func.lower(MembershipPlan.name) == name.lower())
@@ -174,12 +177,10 @@ class MembershipService:
         if await self.session.scalar(statement) is not None:
             raise PlanNameTakenError("a plan with this name already exists")
 
-    async def commit_plan_change(self) -> None:
+    async def _flush_plan_change(self) -> None:
         try:
-            await self.session.commit()
+            await self.session.flush()
         except IntegrityError as error:
-            # Another manager saved the same name between the check and this commit.
-            await self.session.rollback()
             raise PlanNameTakenError("a plan with this name already exists") from error
 
     async def purchase(self, user_id: UUID, plan_id: int) -> PurchaseResult:
@@ -201,27 +202,31 @@ class MembershipService:
         # same member run one after the other and the second sees the first membership.
         await self.session.execute(select(User.id).where(User.id == user_id).with_for_update())
         today = datetime.now(UTC).date()
+        if await self.has_pending_membership(user_id):
+            raise PendingMembershipExistsError("you already have a payment awaiting completion")
         if await self.has_active_membership(user_id, today):
-            await self.session.rollback()
             raise ActiveMembershipExistsError("you already have an active membership")
 
-        payment = self.payment_gateway.charge(plan.price_minor, plan.currency)
-        if payment.status != PaymentStatus.APPROVED:
-            await self.session.rollback()
+        payment = await self.payment_gateway.create_checkout(
+            plan.price_minor, plan.currency, plan_name=plan.name
+        )
+        if payment.status == PaymentStatus.DECLINED:
             raise PaymentDeclinedError("payment was declined")
+        if payment.status != PaymentStatus.PENDING:
+            raise PaymentDeclinedError("payment could not be started")
 
         membership = Membership(
             user_id=user_id,
             plan_id=plan.id,
-            status=MembershipStatus.ACTIVE,
+            status=MembershipStatus.PENDING,
             starts_on=today,
             # ends_on is inclusive, so a 30-day plan bought today ends on day 30.
             ends_on=today + timedelta(days=plan.duration_days - 1),
             payment_reference=payment.reference,
+            stripe_session_id=payment.reference,
         )
         self.session.add(membership)
-        await self.session.commit()
-        await self.session.refresh(membership)
+        await self.session.flush()
         return PurchaseResult(membership=membership, plan=plan, payment=payment)
 
     async def latest_membership(self, user_id: UUID) -> Membership | None:
@@ -239,15 +244,11 @@ class MembershipService:
         await self.lock_member(user_id)
         membership = await self.latest_membership(user_id)
         if membership is None:
-            await self.session.rollback()
             raise MembershipNotFoundError("you do not have a membership")
         try:
             state_of(membership, datetime.now(UTC).date()).cancel(membership)
         except ValueError:
-            await self.session.rollback()
             raise
-        await self.session.commit()
-        await self.session.refresh(membership)
         return membership
 
     async def renew(self, user_id: UUID) -> PurchaseResult:
@@ -261,38 +262,48 @@ class MembershipService:
 
         await self.lock_member(user_id)
         today = datetime.now(UTC).date()
+        if await self.has_pending_membership(user_id):
+            raise PendingMembershipExistsError("you already have a payment awaiting completion")
         membership = await self.latest_membership(user_id)
         if membership is None:
-            await self.session.rollback()
             raise MembershipNotFoundError("you do not have a membership to renew")
         plan = membership.plan
         if not plan.is_active or plan.price_minor <= 0:
-            await self.session.rollback()
             raise PlanNotFoundError("this plan is no longer on sale, please choose another")
         try:
             terms = state_of(membership, today).renewal_terms(membership, plan.duration_days, today)
         except ValueError:
-            await self.session.rollback()
             raise
 
-        payment = self.payment_gateway.charge(plan.price_minor, plan.currency)
-        if payment.status != PaymentStatus.APPROVED:
-            await self.session.rollback()
+        payment = await self.payment_gateway.create_checkout(
+            plan.price_minor, plan.currency, plan_name=plan.name
+        )
+        if payment.status == PaymentStatus.DECLINED:
             raise PaymentDeclinedError("payment was declined")
+        if payment.status != PaymentStatus.PENDING:
+            raise PaymentDeclinedError("payment could not be started")
 
-        membership.status = MembershipStatus.ACTIVE
-        membership.starts_on = terms.starts_on
-        membership.ends_on = terms.ends_on
-        # Only the latest payment is kept on the membership.
-        membership.payment_reference = payment.reference
-        await self.session.commit()
-        await self.session.refresh(membership)
+        # Do not change the current membership while Checkout is outstanding.
+        # On a successful webhook, this row becomes active and its precomputed
+        # renewal dates take effect.
+        membership = Membership(
+            user_id=user_id,
+            plan_id=plan.id,
+            status=MembershipStatus.PENDING,
+            starts_on=terms.starts_on,
+            ends_on=terms.ends_on,
+            payment_reference=payment.reference,
+            stripe_session_id=payment.reference,
+        )
+        self.session.add(membership)
+        await self.session.flush()
         return PurchaseResult(membership=membership, plan=plan, payment=payment)
 
     async def lock_member(self, user_id: UUID) -> None:
         # Lock this member's row until the transaction ends, so two changes to the
         # same member's membership run one after the other.
         await self.session.execute(select(User.id).where(User.id == user_id).with_for_update())
+
     async def booking_membership(self, user_id: UUID, on_date: date) -> Membership | None:
         """Load the current membership and its plan rules without lazy database access."""
         return await self.session.scalar(
@@ -317,6 +328,17 @@ class MembershipService:
             Membership.ends_on >= active_date,
         )
         return await self.session.scalar(statement) is not None
+
+    async def has_pending_membership(self, user_id: UUID) -> bool:
+        return (
+            await self.session.scalar(
+                select(Membership.id).where(
+                    Membership.user_id == user_id,
+                    Membership.status == MembershipStatus.PENDING,
+                )
+            )
+            is not None
+        )
 
     async def has_entitlement(
         self,

@@ -89,6 +89,26 @@ class Membership(Base, IdMixin, TimestampMixin):
     )
     starts_on: Mapped[date] = mapped_column(sa.Date)
     ends_on: Mapped[date] = mapped_column(sa.Date, index=True)
-    payment_reference: Mapped[str | None] = mapped_column(sa.String(64), unique=True)
+    payment_reference: Mapped[str | None] = mapped_column(sa.String(255), unique=True)
+    stripe_session_id: Mapped[str | None] = mapped_column(sa.String(255), unique=True)
     user: Mapped[User] = relationship(back_populates="memberships")
     plan: Mapped[MembershipPlan] = relationship(back_populates="memberships")
+    stripe_events: Mapped[list[StripeEvent]] = relationship(
+        back_populates="membership", cascade=ASYNC_CASCADE, passive_deletes=True
+    )
+
+
+class StripeEvent(Base, IdMixin, TimestampMixin):
+    """A verified Stripe event processed by this API.
+
+    The Stripe event ID is the idempotency key. A successful Checkout event is
+    recorded in the same transaction that activates its pending membership.
+    """
+
+    __tablename__ = "stripe_events"
+
+    stripe_event_id: Mapped[str] = mapped_column(sa.String(255), unique=True)
+    membership_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("memberships.id", ondelete="CASCADE"), index=True
+    )
+    membership: Mapped[Membership] = relationship(back_populates="stripe_events")

@@ -10,14 +10,17 @@ from app.core.database import close_db_engine, is_db_available
 from app.core.exceptions import install_exception_handlers
 from app.core.redis import close_redis_client, is_cache_redis_available
 from app.core.scheduler import create_scheduler
+from app.modules.memberships.payment_gateway import PaymentGatewayFactory
 from app.shared.constants import HEALTH_CHECK_TIMEOUT_SECONDS
 
 settings = get_settings()
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(application: FastAPI):
     scheduler = create_scheduler() if settings.enable_booking_jobs else None
+    payment_gateway = PaymentGatewayFactory.create(settings)
+    application.state.payment_gateway = payment_gateway
     if scheduler is not None:
         scheduler.start()
     try:
@@ -25,6 +28,7 @@ async def lifespan(_: FastAPI):
     finally:
         if scheduler is not None:
             scheduler.shutdown(wait=False)
+        await payment_gateway.aclose()
         await close_redis_client()
         await close_db_engine()
 
@@ -41,9 +45,12 @@ install_exception_handlers(app)
 app.include_router(api_router)
 
 
-@app.get("/health", tags=["health"])
+@app.get(
+    "/health",
+    tags=["health"],
+    description="Report whether required infrastructure is reachable.",
+)
 async def health_check() -> dict[str, str]:
-    """Returns 200 when both PostgreSQL and Redis are reachable."""
     try:
         database_available, cache_redis_available = await wait_for(
             gather(
