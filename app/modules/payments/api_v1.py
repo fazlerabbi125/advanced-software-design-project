@@ -1,10 +1,4 @@
-"""Stripe webhook endpoint.
-
-This temporary endpoint verifies that local Stripe CLI forwarding and signature
-verification work. It deliberately does not activate memberships or write payment
-records; that requires the pending-payment lifecycle described in the implementation
-guide.
-"""
+"""Stripe webhook endpoint."""
 
 from __future__ import annotations
 
@@ -15,22 +9,26 @@ import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.config import Settings, get_settings
+from app.core.dependencies import DbSession
+from app.modules.payments.dependencies import StripeWebhookServiceDependency
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 
-@router.post("/stripe/webhook", status_code=status.HTTP_200_OK)
+@router.post(
+    "/stripe/webhook",
+    status_code=status.HTTP_200_OK,
+    description="Process verified Stripe Checkout events.",
+)
 async def stripe_webhook(
     request: Request,
+    session: DbSession,
+    service: StripeWebhookServiceDependency,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, str]:
-    """Verify and log a Stripe event without changing application data.
-
-    Stripe signs the exact raw bytes sent to this endpoint. Do not parse or modify
-    the request body before ``construct_event`` verifies the signature.
-    """
+    # Stripe signs these exact bytes; verification must happen before parsing.
     payload = await request.body()
     signature = request.headers.get("Stripe-Signature", "")
     try:
@@ -46,9 +44,40 @@ async def stripe_webhook(
             detail="invalid Stripe webhook",
         ) from error
 
+    event_type = event["type"]
+    if event_type == "checkout.session.completed":
+        checkout = event["data"]["object"]
+        if checkout.get("payment_status") != "paid":
+            logger.info("Ignored unpaid Stripe Checkout event: event_id=%s", event["id"])
+            return {"status": "ignored"}
+        payment_succeeded = True
+    elif event_type == "checkout.session.async_payment_succeeded":
+        checkout = event["data"]["object"]
+        payment_succeeded = True
+    elif event_type in {"checkout.session.async_payment_failed", "checkout.session.expired"}:
+        checkout = event["data"]["object"]
+        payment_succeeded = False
+    else:
+        logger.info(
+            "Ignored verified Stripe event: event_id=%s event_type=%s",
+            event["id"],
+            event_type,
+        )
+        return {"status": "ignored"}
+
+    try:
+        outcome = await service.process_checkout(
+            stripe_event_id=str(event["id"]),
+            stripe_session_id=str(checkout["id"]),
+            payment_succeeded=payment_succeeded,
+        )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
     logger.info(
-        "Verified Stripe webhook received: event_id=%s event_type=%s",
+        "Processed verified Stripe Checkout event: event_id=%s outcome=%s",
         event["id"],
-        event["type"],
+        outcome,
     )
-    return {"status": "received"}
+    return {"status": outcome}

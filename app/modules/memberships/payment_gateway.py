@@ -4,57 +4,66 @@ Factory Method pattern
 -----------------------
 ``PaymentGatewayFactory.create(settings)`` is the factory method. It reads the
 ``PAYMENT_PROVIDER`` setting and returns the right concrete gateway. All caller
-code only knows about the ``PaymentGateway`` protocol — it never inspects
+code only knows about the ``PaymentGateway`` abstract contract — it never inspects
 environment variables or decides which provider to use.
 
 Adding a new provider (e.g. PayPal) means:
-  1. Implement ``PaypalGateway`` that satisfies the ``PaymentGateway`` protocol.
+  1. Implement ``PaypalGateway(PaymentGateway)``.
   2. Add one ``elif`` branch inside ``PaymentGatewayFactory.create``.
   3. No other files change.
 """
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.core.config import Settings
 
 
 class PaymentStatus(StrEnum):
-    PENDING = "pending"      # Stripe Checkout session created, awaiting webhook
-    APPROVED = "approved"    # Payment confirmed by webhook
+    PENDING = "pending"  # Stripe Checkout session created, awaiting webhook
+    APPROVED = "approved"  # Payment confirmed by webhook
     DECLINED = "declined"
 
 
 @dataclass(frozen=True, slots=True)
 class PaymentResult:
-    reference: str           # Stripe Checkout Session ID (cs_test_...)
+    reference: str  # Stripe Checkout Session ID (cs_test_...)
     status: PaymentStatus
     amount_minor: int
     currency: str
     checkout_url: str | None = None  # Redirect the member here to complete payment
 
 
-class PaymentGateway(Protocol):
+class PaymentGateway(ABC):
     """Interface every payment provider must satisfy.
 
-    ``charge`` creates a payment session and returns a ``PaymentResult``.
+    ``create_checkout`` creates a payment session and returns a ``PaymentResult``.
     The result status will be ``PENDING`` for redirect-based flows (Stripe
     Checkout). The membership is only activated after a verified webhook
     event — never based on the browser return URL.
     """
 
-    def charge(self, amount_minor: int, currency: str) -> PaymentResult: ...
+    @abstractmethod
+    async def create_checkout(
+        self, amount_minor: int, currency: str, *, plan_name: str
+    ) -> PaymentResult:
+        """Create a provider-hosted Checkout session."""
+
+    @abstractmethod
+    async def aclose(self) -> None:
+        """Release resources held by this gateway."""
 
 
-class StripeCheckoutGateway:
+class StripeCheckoutGateway(PaymentGateway):
     """Real Stripe Checkout gateway (sandbox / production depending on key).
 
     How it works:
-    1. ``charge()`` creates a Stripe Checkout Session and returns a PENDING
+    1. ``create_checkout()`` creates a Stripe Checkout Session and returns a PENDING
        result that includes a ``checkout_url``.
     2. The API returns that URL to the client. The member is redirected to
        Stripe's hosted payment page.
@@ -71,16 +80,16 @@ class StripeCheckoutGateway:
     def __init__(self, secret_key: str, success_url: str, cancel_url: str) -> None:
         import stripe
 
-        self._client = stripe.StripeClient(secret_key)
+        self._http_client = stripe.HTTPXClient()
+        self._client = stripe.StripeClient(secret_key, http_client=self._http_client)
         self._success_url = success_url
         self._cancel_url = cancel_url
 
-    def charge(self, amount_minor: int, currency: str, plan_name: str = "BFS Gym Membership") -> PaymentResult:  # type: ignore[override]
-        import stripe
-
-        session = self._client.checkout.sessions.create(
+    async def create_checkout(
+        self, amount_minor: int, currency: str, *, plan_name: str
+    ) -> PaymentResult:
+        session = await self._client.v1.checkout.sessions.create_async(
             params={
-                "payment_method_types": ["card"],
                 "line_items": [
                     {
                         "price_data": {
@@ -104,20 +113,22 @@ class StripeCheckoutGateway:
             checkout_url=session.url,
         )
 
+    async def aclose(self) -> None:
+        await self._http_client.close_async()
+
 
 class PaymentGatewayFactory:
     """Factory Method: creates the right payment gateway from application settings.
 
     The factory is the only place that reads ``PAYMENT_PROVIDER``. Service
-    code receives a ``PaymentGateway`` and calls ``.charge()`` — it has no
+    code receives a ``PaymentGateway`` and calls ``.create_checkout()`` — it has no
     knowledge of which provider is behind it.
     """
 
     @staticmethod
     def create(settings: Settings) -> PaymentGateway:
-        # Currently only Stripe is supported. The factory is kept so that
-        # future providers (PayPal, GoCardless, etc.) can be plugged in by
-        # adding a branch here and a concrete class above.
+        if settings.payment_provider != "stripe":
+            raise ValueError(f"unsupported payment provider: {settings.payment_provider}")
         return StripeCheckoutGateway(
             secret_key=settings.stripe_secret_key.get_secret_value(),
             success_url=settings.stripe_success_url,

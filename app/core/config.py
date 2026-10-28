@@ -1,7 +1,7 @@
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     jwt_access_secret_key: SecretStr
     jwt_refresh_secret_key: SecretStr
     jwt_algorithm: Final[str] = "HS256"
-    jwt_issuer: str|None = None
-    jwt_audience: str|None = None
+    jwt_issuer: str | None = None
+    jwt_audience: str | None = None
     jwt_access_expiration: int = int(timedelta(minutes=15).total_seconds())
     jwt_refresh_expiration: int = int(timedelta(weeks=3).total_seconds())
     cors_allow_origins: list[str] = Field(default_factory=list)
@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     # Production keys must never be committed to the repository.
     stripe_secret_key: SecretStr
     stripe_webhook_secret: SecretStr
+    payment_provider: Literal["stripe"] = "stripe"
     # URLs Stripe redirects the member to after checkout completes or is abandoned.
     stripe_success_url: str = "/docs#/memberships/purchase_membership"
     stripe_cancel_url: str = "/docs#/memberships/purchase_membership"

@@ -27,7 +27,7 @@ The business rules include membership plans with configurable booking windows an
 
 - JWT authentication (access + refresh tokens) with member, staff, and manager roles.
 - Membership plans (Basic, Standard, Premium) with entitlement-based access control.
-- Stripe Checkout gateway (sandbox mode) and a verified webhook-receipt endpoint; membership activation remains pending webhook lifecycle work.
+- Stripe Checkout gateway (sandbox mode), pending memberships, and a verified, idempotent webhook that activates a membership only after payment succeeds.
 - Booking creation, listing, cancellation, and eligibility feedback (active membership, plan entitlement, booking window, weekly limit, same-start conflict checks).
 - VIP occupancy tracking, automatic waiting lists, and visit expiry using Redis sorted sets.
 - Scanner/device check-in with configurable device keys and zone-specific access policies.
@@ -190,7 +190,7 @@ Application-level AI extensions (such as **Pydantic AI** for workout recommendat
 
 Celery was originally added as a notification queue placeholder, but it is not needed:
 
-- **Stripe webhooks** are signature-verified synchronously inside the FastAPI endpoint — no background queue is needed. Membership activation will be added with the pending-payment lifecycle.
+- **Stripe webhooks** are signature-verified synchronously inside the FastAPI endpoint — no background queue is needed. A verified paid Checkout event atomically records its event ID and activates the matching pending membership.
 - **In-app notifications** are delivered via Redis Pub/Sub + Server-Sent Events (SSE) — this is instant push delivery; a queue would only add latency.
 - **Periodic background jobs** (waitlist expiry, no-show detection) are handled by APScheduler, which runs inside the FastAPI process with no extra Docker service or infrastructure.
 
@@ -221,7 +221,7 @@ The `migrate` service applies the schema before the API starts. Swagger is avail
 
 ### Enable Stripe webhook forwarding
 
-To test payments locally, start the Stripe CLI sidecar:
+For the full Docker stack, start the Stripe CLI sidecar:
 
 ```powershell
 docker compose --env-file .env.docker --profile stripe up -d --build
@@ -234,7 +234,48 @@ After it starts, copy the `whsec_...` signing secret from the `stripe-listener` 
 docker compose --env-file .env.docker up -d --force-recreate api
 ```
 
-The current webhook endpoint verifies and logs received Stripe events only. It does not activate memberships yet.
+The webhook verifies the Stripe signature, ignores duplicate event IDs, and activates only the matching pending membership after a paid Checkout event. It also handles delayed-payment success and failure events when those methods are enabled in the Stripe account.
+
+### Test Stripe Checkout from Swagger or Postman
+
+1. In the Stripe Dashboard **test mode**, enable **Cards** and the Apple Pay and Google Pay
+   wallets under **Settings → Payment methods**. The API intentionally does not send
+   `payment_method_types`: Stripe Checkout dynamically displays the enabled, eligible methods.
+   Apple Pay and Google Pay are card wallets, not valid separate API method names.
+2. Start the Stripe listener above and copy its current `whsec_...` value into
+   `STRIPE_WEBHOOK_SECRET`; restart the API after changing it.
+3. Ensure an active membership plan exists. In Swagger (`/docs`) sign in as a manager, create a
+   plan with `POST /api/v1/memberships/plans`, then register/sign in as a member. In Postman, use
+   the **Stripe Checkout** folder after setting `planId` and logging in; the collection saves the
+   returned `checkoutUrl`.
+4. Call `POST /api/v1/memberships/purchase` with `{"plan_id": <planId>}` and the member access
+   token. Swagger/Postman returns a pending membership and `checkout_url`; open that URL in a
+   browser. Complete a card test payment with Stripe's `4242 4242 4242 4242` test card, any future
+   expiry date, and any CVC.
+5. Watch the listener/API logs, then call `GET /api/v1/memberships/me`: the pending membership
+   becomes `active` only after the verified webhook is received. Repeating the webhook is safe.
+
+Apple Pay and Google Pay must be tested in the returned Checkout page on an eligible device and
+browser with a configured wallet; neither Swagger nor Postman can display or force those buttons.
+Stripe chooses whether to show them based on the account, customer device, browser, currency, and
+regional eligibility. See Stripe's [dynamic payment-method documentation](https://docs.stripe.com/payments/existing-customers?platform=web&ui=stripe-hosted).
+
+The normal test suite validates the Checkout request shape without network access. To run the
+optional real sandbox-session test (it creates a session only, no charge), use a test key and:
+
+```powershell
+$env:BFS_STRIPE_INTEGRATION_TEST = "1"
+uv run --env-file .env python -m unittest tests.test_payment_gateway -v
+```
+
+For the host-run API workflow (`compose.local.yml`), use the local sidecar instead. It forwards to the API through Docker Desktop's `host.docker.internal` hostname:
+
+```powershell
+docker compose -f compose.local.yml --env-file .env --profile stripe up -d
+docker compose -f compose.local.yml --env-file .env --profile stripe logs -f stripe-listener
+```
+
+Copy the displayed `whsec_...` value into `.env` and restart the host-run FastAPI process.
 
 To apply a new migration:
 

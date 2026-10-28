@@ -7,6 +7,10 @@
     { "key": "baseUrl", "value": "http://localhost:8000/api/v1" },
     { "key": "accessToken", "value": "" },
     { "key": "refreshToken", "value": "" },
+    { "key": "memberId", "value": "" },
+    { "key": "planId", "value": "1" },
+    { "key": "checkoutUrl", "value": "" },
+    { "key": "stripeSessionId", "value": "" },
     { "key": "deviceKey", "value": "test-sauna-key" },
     { "key": "sessionId", "value": "1" },
     { "key": "bookingId", "value": "1" },
@@ -23,7 +27,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"email\": \"member@example.com\",\n  \"password\": \"correct-horse-battery-staple\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"member@example.com\",\n  \"password\": \"correct-horse-battery-staple\",\n  \"name\": \"Example Member\"\n}" },
             "url": "{{baseUrl}}/auth/register"
           }
         },
@@ -34,7 +38,18 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\n  \"email\": \"member@example.com\",\n  \"password\": \"correct-horse-battery-staple\"\n}" },
             "url": "{{baseUrl}}/auth/login"
-          }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.collectionVariables.set('accessToken', body.access_token);",
+                "pm.collectionVariables.set('refreshToken', body.refresh_token);"
+              ]
+            }
+          }]
         },
         {
           "name": "Refresh token",
@@ -83,9 +98,20 @@
               { "key": "Authorization", "value": "Bearer {{accessToken}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"plan_id\": 3\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"plan_id\": {{planId}}\n}" },
             "url": "{{baseUrl}}/memberships/purchase"
-          }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.collectionVariables.set('checkoutUrl', body.checkout_url);",
+                "pm.collectionVariables.set('stripeSessionId', body.payment_reference);"
+              ]
+            }
+          }]
         },
         {
           "name": "Renew my membership",
@@ -102,6 +128,62 @@
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
             "url": "{{baseUrl}}/memberships/me/cancel"
           }
+        }
+      ]
+    },
+    {
+      "name": "Stripe Checkout",
+      "description": "Start the listener first: docker compose -f compose.local.yml --env-file .env --profile stripe up -d. Copy its whsec_ value into STRIPE_WEBHOOK_SECRET and restart FastAPI. Send a Checkout request, open {{checkoutUrl}}, complete it with Stripe test data, then call Members / My memberships. Do not send real webhook events from Postman: Stripe CLI forwards signed events.",
+      "item": [
+        {
+          "name": "Create Checkout (purchase)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"plan_id\": {{planId}}\n}" },
+            "url": "{{baseUrl}}/memberships/purchase"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.collectionVariables.set('checkoutUrl', body.checkout_url);",
+                "pm.collectionVariables.set('stripeSessionId', body.payment_reference);"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "Create Checkout (renewal)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/memberships/me/renew"
+          }
+        },
+        {
+          "name": "Unsigned webhook is rejected (expected 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Stripe-Signature", "value": "invalid" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/payments/stripe/webhook"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": ["pm.test('unsigned webhook is rejected', () => pm.response.to.have.status(400));"]
+            }
+          }]
         }
       ]
     },
@@ -153,7 +235,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"session_id\": {{sessionId}}\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"timetable_session_id\": {{sessionId}}\n}" },
             "url": "{{baseUrl}}/bookings"
           }
         },
@@ -208,7 +290,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"member_id\": 1,\n  \"zone\": \"gym_floor\",\n  \"reason\": \"Scanner offline, photo ID checked\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"member_id\": \"{{memberId}}\",\n  \"zone\": \"gym_floor\",\n  \"reason\": \"Scanner offline, photo ID checked\"\n}" },
             "url": "{{baseUrl}}/access/manual-check-in"
           }
         },
@@ -226,7 +308,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "X-Device-Key", "value": "{{deviceKey}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"member_id\": 3\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"member_id\": \"{{memberId}}\"\n}" },
             "url": "{{baseUrl}}/access/device-check-in"
           }
         },
