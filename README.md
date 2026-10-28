@@ -244,6 +244,12 @@ uv run --env-file .env alembic upgrade head
 uv run --env-file .env fastapi dev app/main.py
 ```
 
+Check the local Redis container is running:
+
+```powershell
+docker compose -f compose.local.yml --env-file .env ps
+```
+
 ## Full Docker Setup
 
 Copy `.env.docker.example` to `.env.docker` and replace placeholder secrets, then start the full stack:
@@ -299,8 +305,14 @@ The normal test suite validates the Checkout request shape without network acces
 optional real sandbox-session test (it creates a session only, no charge), use a test key and:
 
 ```powershell
-$env:BFS_STRIPE_INTEGRATION_TEST = "1"
-uv run --env-file .env python -m unittest tests.test_payment_gateway -v
+$env:BFS_STRIPE_INTEGRATION_TEST = "1";uv run --env-file .env python -m unittest discover -s tests -v
+
+# Run all tests
+$env:BFS_STRIPE_INTEGRATION_TEST = "1";uv run --env-file .env python -m unittest tests.test_payment_gateway -v
+```
+
+```bash
+BFS_STRIPE_INTEGRATION_TEST=1 uv run --env-file .env python -m unittest tests.test_payment_gateway -v
 ```
 
 For the host-run API workflow (`compose.local.yml`), use the local sidecar instead. It forwards to the API through Docker Desktop's `host.docker.internal` hostname:
@@ -341,8 +353,60 @@ docker compose --env-file .env.docker run --rm migrate
 
 ## Verification
 
+Run the unit/API tests (database integration tests are skipped unless a disposable test database
+is configured):
+
 ```powershell
 uv run python -m unittest discover -s tests -v
+```
+
+Run the complete test suite, including database integration tests. Add this value to an uncommitted
+`.env` or `.env.test` file; use a separate database, because tests create and drop schemas:
+
+```env
+BFS_TEST_DATABASE_URL=postgresql+asyncpg://bfs_gym:your-password@localhost:5432/bfs_gym_test
+```
+
+```powershell
+# Start Redis for the host-run development setup when it is not already running.
+docker compose -f compose.local.yml --env-file .env up -d cache-redis
+
+# The environment file must be passed to uv because unittest skip conditions
+# read BFS_TEST_DATABASE_URL directly from the process environment.
+uv run --env-file .env python -m unittest discover -s tests -v
+```
+
+The one remaining default skip is the opt-in live Stripe sandbox test. Run it only with a valid
+`sk_test_...` key; it creates a Checkout Session but never charges a card:
+
+PowerShell:
+
+```powershell
+$env:BFS_STRIPE_INTEGRATION_TEST = "1"
+uv run --env-file .env python -m unittest tests.test_payment_gateway -v
+```
+
+Bash:
+
+```bash
+BFS_STRIPE_INTEGRATION_TEST=1 uv run --env-file .env python -m unittest tests.test_payment_gateway -v
+```
+
+Expected result: both payment-gateway tests pass. The sandbox test creates a Stripe test-mode Checkout
+Session only; it does not complete a payment or charge a card. Dependency deprecation warnings from
+`httpx` do not make this test fail.
+
+For the full Docker stack, start its database and Redis services, then run the same test command
+on the host with `BFS_TEST_DATABASE_URL` pointing at a reachable disposable test database. The
+project's normal full-stack startup command is:
+
+```powershell
+docker compose --env-file .env.docker up -d --build
+```
+
+Run static checks separately:
+
+```powershell
 uv run ruff check .
 uv run ruff format --check .
 ```

@@ -22,7 +22,7 @@ class EquipmentUnit(Base, IdMixin, TimestampMixin):
 
     __tablename__ = "equipment_units"
     __table_args__ = (
-        sa.Index("uq_equipment_units_name_ci", sa.func.lower("name"), unique=True),
+        sa.Index("uq_equipment_units_name_ci", sa.func.lower(sa.column("name")), unique=True),
     )
 
     name: Mapped[str] = mapped_column(sa.String(150))
