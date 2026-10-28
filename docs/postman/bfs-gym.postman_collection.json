@@ -68,6 +68,7 @@
       "item": [
         {
           "name": "Upload biometric image",
+          "description": "Upload a PNG, image/jpeg, or image/jpg photo at least 300x300 pixels with one visible frontal face. Rejected files return 422 and are not stored.",
           "request": {
             "method": "POST",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],

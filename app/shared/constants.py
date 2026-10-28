@@ -41,7 +41,12 @@ HEALTH_CHECK_TIMEOUT_SECONDS = 5
 MAX_BIOMETRIC_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_PAGE_SIZE = 100
 MIN_PASSWORD_LENGTH = 12
-ALLOWED_BIOMETRIC_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
+ALLOWED_BIOMETRIC_IMAGE_TYPES = frozenset({"image/jpeg", "image/jpg", "image/png"})
+BIOMETRIC_IMAGE_SUFFIXES = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+}
 BIOMETRIC_UPLOAD_CHUNK_BYTES = 1024 * 1024
 # Members who miss this many booked sessions in the window cannot book again until
 # the oldest no-show falls outside the window.
