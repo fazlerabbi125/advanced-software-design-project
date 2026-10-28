@@ -5,7 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.dependencies import DbSessionDep
 from app.models.access import AccessEvent, AccessZone
 from app.models.auth import User, UserRole
-from app.modules.access.dependencies import AccessServiceDependency, ScannerZone
+from app.modules.access.biometric_service import BiometricScanDeniedError
+from app.modules.access.dependencies import (
+    AccessServiceDependency,
+    BiometricAccessServiceDependency,
+    ScannerDeviceDependency,
+)
 from app.modules.access.policies import ZoneFullError
 from app.modules.access.schemas import (
     AccessLogResponse,
@@ -135,13 +140,20 @@ async def current_occupancy(
 async def device_check_in(
     payload: DeviceCheckInRequest,
     session: DbSessionDep,
-    service: AccessServiceDependency,
-    zone: ScannerZone,
+    service: BiometricAccessServiceDependency,
+    scanner: ScannerDeviceDependency,
 ) -> Any:
     result = None
     try:
-        result = await service.check_in(payload.member_id, zone, source="face_recognition")
+        result = await service.check_in(payload, scanner)
         await session.commit()
+    except BiometricScanDeniedError as error:
+        try:
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
     except ZoneFullError as error:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
@@ -151,7 +163,7 @@ async def device_check_in(
     except Exception:
         await session.rollback()
         if result is not None and result.took_new_place:
-            await service.release_place(payload.member_id, zone)
+            await service.access.release_place(result.access_log.member_id, scanner.zone)
         raise
     return result.access_log
 

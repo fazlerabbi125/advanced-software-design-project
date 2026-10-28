@@ -10,7 +10,7 @@ BFS Gym serves three tiers of members:
 
 - **Standard members** access the gym floor and can book fitness classes.
 - **Premium members** additionally access the swimming pool, personal training, and the VIP wellness suites.
-- All members are identified at entry doors by a biometric scanner that compares their live face against their enrolled photo.
+- Entry-door scanners perform face matching and send a trusted template ID plus confidence score to the API; the API validates access rules.
 
 The business rules include membership plans with configurable booking windows and weekly limits, VIP room capacity enforcement with automatic waiting lists, booking eligibility checks before any reservation is accepted, and automated notifications when significant events occur.
 
@@ -30,7 +30,7 @@ The business rules include membership plans with configurable booking windows an
 - Stripe Checkout gateway (sandbox mode), pending memberships, and a verified, idempotent webhook that activates a membership only after payment succeeds.
 - Booking creation, listing, cancellation, and eligibility feedback (active membership, plan entitlement, booking window, weekly limit, same-start conflict checks).
 - VIP occupancy tracking, automatic waiting lists, and visit expiry using Redis sorted sets.
-- Scanner/device check-in with configurable device keys and zone-specific access policies.
+- Scanner/device check-in with indexed template lookup, confidence validation, denied-scan auditing, configurable device keys, and zone-specific access policies.
 - Member biometric photo upload for enrolment reference.
 - Durable in-app notifications, Redis Pub/Sub delivery, and authenticated SSE streaming.
 
@@ -90,6 +90,7 @@ erDiagram
         string biometric_image_key UK
         string biometric_content_type
         timestamp biometric_uploaded_at
+        uuid biometric_template_id UK
     }
     MEMBERSHIP_PLAN {
         int id PK
@@ -150,6 +151,15 @@ erDiagram
         timestamp occurred_at
         string source
     }
+    DENIED_ACCESS_ATTEMPT {
+        int id PK
+        uuid biometric_template_id
+        string scanner_key_fingerprint
+        enum zone
+        float confidence
+        enum reason
+        timestamp occurred_at
+    }
     REFRESH_TOKEN {
         int id PK
         uuid user_id FK
@@ -187,10 +197,26 @@ erDiagram
 
 ## Why No External Cloud AI for Door Scanners
 
-The biometric scanner feature uses **offline face comparison** (a local Python library, no external API key). Real gym door scanners have embedded face-recognition chips. Our API trusts the scanner's result (device key + template ID + confidence score) and enforces the business rules — it does not need to replicate face recognition in an external AI service.
+The biometric scanner feature uses scanner-owned matching (mocked for this project), with no external API key. The API accepts only a trusted device key, template ID, and confidence score; it performs one indexed profile lookup, applies business rules, and logs denied scans without retaining the raw device key.
 
 Optional biometric enrolment-photo quality validation may use local OpenCV checks. It is separate from
 scanner-owned recognition and does not require Pydantic AI or an external AI API key.
+
+### Test biometric scanner check-in
+
+1. Set `SCANNER_DEVICE_KEYS='{"test-sauna-key":"vip_sauna"}'` and optionally set
+   `BIOMETRIC_MIN_CONFIDENCE=0.80` in `.env`, then restart the API.
+2. Register and log in as a member, upload an enrolment image, and copy the returned `template_id`.
+   The bundled Postman collection saves it as `{{biometricTemplateId}}` automatically.
+3. Send `POST /api/v1/access/device-check-in` with `X-Device-Key: test-sauna-key` and:
+
+   ```json
+   {"template_id":"<returned UUID>","confidence":0.92}
+   ```
+
+   A valid member with the required entitlement receives `201`. Unknown template IDs and confidence
+   below the threshold receive specific `403` responses; a full VIP area returns `409`. Each rejection
+   is recorded in `denied_access_attempts` with a hashed device-key fingerprint.
 
 ## Why No Celery
 

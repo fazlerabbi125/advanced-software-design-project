@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.models.access import AccessZone
 
@@ -36,7 +36,8 @@ class AccessLogResponse(BaseModel):
 class DeviceCheckInRequest(BaseModel):
     """Sent by a door scanner after it has recognised a member's face."""
 
-    member_id: UUID
+    template_id: UUID
+    confidence: float = Field(ge=0, le=1)
 
 
 class WaitlistPositionResponse(BaseModel):
