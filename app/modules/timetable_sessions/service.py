@@ -7,7 +7,10 @@ from app.models.bookings import BookingResourceType
 from app.models.facilities import EquipmentUnit
 from app.models.timetable_sessions import TimetableSession
 from app.modules.facilities.service import EquipmentUnitNotFoundError
-from app.modules.sessions.schemas import CreateSessionRequest, GenerateEquipmentSlotsRequest
+from app.modules.timetable_sessions.schemas import (
+    CreateSessionRequest,
+    GenerateEquipmentSlotsRequest,
+)
 from app.shared.helpers import utc_now
 
 
@@ -27,8 +30,6 @@ class TimetableService:
             unit = await self._locked_unit_in_service(payload.equipment_unit_id)
             resource_name = unit.name
             if await self._unit_has_slot(unit.id, starts_at, ends_at):
-                # Read before rolling back: the rollback expires the loaded unit.
-                await self.session.rollback()
                 raise EquipmentUnavailableError(f"{resource_name} already has a slot at that time")
         timetable_session = TimetableSession(
             resource_name=resource_name,
@@ -41,19 +42,17 @@ class TimetableService:
             equipment_unit_id=payload.equipment_unit_id,
         )
         self.session.add(timetable_session)
-        await self.session.commit()
-        await self.session.refresh(timetable_session)
+        await self.session.flush()
         return timetable_session
 
     async def generate_equipment_slots(
         self, payload: GenerateEquipmentSlotsRequest
     ) -> list[TimetableSession]:
-        """Add back-to-back one-member slots on a unit, skipping times it is already booked."""
         unit = await self._locked_unit_in_service(payload.equipment_unit_id)
         length = timedelta(minutes=payload.slot_minutes)
         starts_at = payload.starts_at.astimezone(UTC)
         ends_at = payload.ends_at.astimezone(UTC)
-        created = []
+        created: list[TimetableSession] = []
         while starts_at + length <= ends_at:
             if not await self._unit_has_slot(unit.id, starts_at, starts_at + length):
                 slot = TimetableSession(
@@ -68,21 +67,17 @@ class TimetableService:
                 self.session.add(slot)
                 created.append(slot)
             starts_at += length
-        await self.session.commit()
+        await self.session.flush()
         return created
 
     async def _locked_unit_in_service(self, unit_id: int) -> EquipmentUnit:
-        # Locked so a fault confirmed at the same moment cannot miss the new slots.
         unit = await self.session.scalar(
             select(EquipmentUnit).where(EquipmentUnit.id == unit_id).with_for_update()
         )
         if unit is None:
-            await self.session.rollback()
             raise EquipmentUnitNotFoundError("equipment unit was not found")
         if not unit.in_service:
-            message = f"{unit.name} is out of service"
-            await self.session.rollback()
-            raise EquipmentUnavailableError(message)
+            raise EquipmentUnavailableError(f"{unit.name} is out of service")
         return unit
 
     async def _unit_has_slot(self, unit_id: int, starts_at: datetime, ends_at: datetime) -> bool:

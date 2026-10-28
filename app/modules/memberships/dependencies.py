@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from app.core.dependencies import DbSession
+from app.core.dependencies import DbSessionDep
 from app.modules.memberships.payment_gateway import PaymentGateway
 from app.modules.memberships.service import MembershipService
 
@@ -15,7 +15,7 @@ PaymentGatewayDependency = Annotated[PaymentGateway, Depends(get_payment_gateway
 
 
 def get_membership_service(
-    session: DbSession, payment_gateway: PaymentGatewayDependency
+    session: DbSessionDep, payment_gateway: PaymentGatewayDependency
 ) -> MembershipService:
     return MembershipService(session, payment_gateway)
 

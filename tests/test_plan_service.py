@@ -63,7 +63,7 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def create(self, name, price_minor=2500, window=1, limit=1, entitlements=(CLASS,)):
         async with self.sessions() as session:
-            return await MembershipService(session).create_plan(
+            plan = await MembershipService(session).create_plan(
                 name=name,
                 price_minor=price_minor,
                 currency="EUR",
@@ -72,6 +72,8 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
                 weekly_booking_limit=limit,
                 entitlements=set(entitlements),
             )
+            await session.commit()
+            return plan
 
     async def entitlements_of(self, plan_id):
         async with self.sessions() as session:
@@ -99,6 +101,7 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
             plan = await MembershipService(session).update_plan(
                 self.standard.id, weekly_booking_limit=6, entitlements={GYM, POOL}
             )
+            await session.commit()
 
         self.assertEqual(plan.weekly_booking_limit, 6)
         self.assertEqual(plan.booking_window_days, 3)
@@ -112,6 +115,7 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(PlanNameTakenError):
                 await service.update_plan(self.standard.id, name="STUDENT")
             plan = await service.update_plan(self.standard.id, name="STANDARD")
+            await session.commit()
         self.assertEqual(plan.name, "STANDARD")
 
     async def test_unknown_plan_and_unknown_fields_are_refused(self):
@@ -128,6 +132,7 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             service = MembershipService(session)
             await service.deactivate_plan(self.standard.id)
+            await session.commit()
             on_sale = [plan.id for plan in await service.list_plans()]
             everything = {plan.id: plan.is_active for plan in await service.list_all_plans()}
         self.assertNotIn(self.standard.id, on_sale)
@@ -163,7 +168,11 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
                 )
                 session.add(timetable_session)
                 await session.commit()
-                return await BookingService(session).create(user_id, timetable_session.id)
+                booking = await BookingService(session, MembershipService(session)).create(
+                    user_id, timetable_session.id
+                )
+                await session.commit()
+                return booking
 
         with patch("app.modules.bookings.service.utc_now", return_value=NOW):
             await book(BookingResourceType.CLASS, days_ahead=0, minutes=60)

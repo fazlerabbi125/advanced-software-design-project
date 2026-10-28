@@ -2,7 +2,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.dependencies import DbSession
+from app.core.dependencies import DbSessionDep
 from app.models.auth import UserRole
 from app.modules.auth.dependencies import CurrentUser, require_roles
 from app.modules.memberships.dependencies import MembershipServiceDependency
@@ -52,7 +52,7 @@ async def list_all_plans(
 )
 async def create_plan(
     payload: CreatePlanRequest,
-    session: DbSession,
+    session: DbSessionDep,
     service: MembershipServiceDependency,
     _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
 ) -> Any:
@@ -74,7 +74,7 @@ async def create_plan(
 async def update_plan(
     plan_id: int,
     payload: UpdatePlanRequest,
-    session: DbSession,
+    session: DbSessionDep,
     service: MembershipServiceDependency,
     _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
 ) -> Any:
@@ -100,7 +100,7 @@ async def update_plan(
 )
 async def deactivate_plan(
     plan_id: int,
-    session: DbSession,
+    session: DbSessionDep,
     service: MembershipServiceDependency,
     _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
 ) -> None:
@@ -124,7 +124,7 @@ async def deactivate_plan(
 async def purchase_membership(
     payload: PurchaseRequest,
     current_user: CurrentUser,
-    session: DbSession,
+    session: DbSessionDep,
     service: MembershipServiceDependency,
 ) -> Any:
     try:
@@ -158,7 +158,7 @@ async def list_my_memberships(
     "/me/cancel", response_model=MembershipResponse, description="Cancel your latest membership."
 )
 async def cancel_my_membership(
-    current_user: CurrentUser, session: DbSession, service: MembershipServiceDependency
+    current_user: CurrentUser, session: DbSessionDep, service: MembershipServiceDependency
 ) -> Any:
     try:
         membership = await service.cancel(current_user.id)
@@ -181,7 +181,7 @@ async def cancel_my_membership(
     description="Create Checkout for membership renewal.",
 )
 async def renew_my_membership(
-    current_user: CurrentUser, session: DbSession, service: MembershipServiceDependency
+    current_user: CurrentUser, session: DbSessionDep, service: MembershipServiceDependency
 ) -> Any:
     try:
         result = await service.renew(current_user.id)

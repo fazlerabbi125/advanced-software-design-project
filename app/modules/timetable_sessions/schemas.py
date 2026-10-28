@@ -14,7 +14,6 @@ def check_time_range(starts_at: datetime, ends_at: datetime) -> None:
 
 
 class CreateSessionRequest(BaseModel):
-    # For an equipment slot the unit's name is used instead.
     resource_name: str = Field(min_length=1, max_length=150)
     resource_type: BookingResourceType
     starts_at: datetime
@@ -35,8 +34,6 @@ class CreateSessionRequest(BaseModel):
 
 
 class GenerateEquipmentSlotsRequest(BaseModel):
-    """Back-to-back slots on one unit, e.g. every 30 minutes from 06:00 to 22:00."""
-
     equipment_unit_id: int = Field(gt=0)
     starts_at: datetime
     ends_at: datetime

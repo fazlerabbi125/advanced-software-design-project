@@ -2,6 +2,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.core.dependencies import DbSessionDep
 from app.models.access import AccessEvent, AccessZone
 from app.models.auth import User, UserRole
 from app.modules.access.dependencies import AccessServiceDependency, ScannerZone
@@ -18,9 +19,15 @@ from app.modules.auth.dependencies import CurrentUser, require_roles
 router = APIRouter(prefix="/access", tags=["access"])
 
 
-@router.post("/check-in", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/check-in",
+    response_model=AccessLogResponse,
+    status_code=status.HTTP_201_CREATED,
+    description="Check a member into a gym zone.",
+)
 async def check_in(
     payload: CheckInRequest,
+    session: DbSessionDep,
     service: AccessServiceDependency,
     current_user: CurrentUser,
 ) -> Any:
@@ -29,30 +36,39 @@ async def check_in(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
         )
+    result = None
     try:
-        access_log = await service.check_in(member_id, payload.zone)
+        result = await service.check_in(member_id, payload.zone)
+        await session.commit()
     except ZoneFullError as error:
+        await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
+        await session.rollback()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    return access_log
+    except Exception:
+        await session.rollback()
+        if result is not None and result.took_new_place:
+            await service.release_place(member_id, payload.zone)
+        raise
+    return result.access_log
 
 
 @router.post(
-    "/manual-check-in", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED
+    "/manual-check-in",
+    response_model=AccessLogResponse,
+    status_code=status.HTTP_201_CREATED,
+    description="Record a staff-authorized manual check-in.",
 )
 async def manual_check_in(
     payload: ManualCheckInRequest,
+    session: DbSessionDep,
     service: AccessServiceDependency,
     staff: Annotated[User, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
 ) -> Any:
-    """Check a member in by hand after staff have verified who they are.
-
-    The same zone rules apply as at the scanner. The signed-in staff member and their
-    reason are stored with the entry.
-    """
+    result = None
     try:
-        access_log = await service.check_in(
+        result = await service.check_in(
             payload.member_id,
             payload.zone,
             source="manual",
@@ -60,16 +76,30 @@ async def manual_check_in(
             staff_id=staff.id,
             reason=payload.reason,
         )
+        await session.commit()
     except ZoneFullError as error:
+        await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
+        await session.rollback()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    return access_log
+    except Exception:
+        await session.rollback()
+        if result is not None and result.took_new_place:
+            await service.release_place(payload.member_id, payload.zone)
+        raise
+    return result.access_log
 
 
-@router.post("/check-out", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/check-out",
+    response_model=AccessLogResponse,
+    status_code=status.HTTP_201_CREATED,
+    description="Check a member out of a gym zone.",
+)
 async def check_out(
     payload: CheckInRequest,
+    session: DbSessionDep,
     service: AccessServiceDependency,
     current_user: CurrentUser,
 ) -> Any:
@@ -78,53 +108,71 @@ async def check_out(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
         )
-    access_log = await service.check_out(member_id, payload.zone)
+    try:
+        access_log = await service.check_out(member_id, payload.zone)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    await service.release_place(member_id, payload.zone)
     return access_log
 
 
-@router.get("/occupancy")
+@router.get("/occupancy", description="Show current zone occupancy for staff.")
 async def current_occupancy(
     service: AccessServiceDependency,
     _: Annotated[object, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
 ) -> dict[str, int]:
-    """Number of people currently inside each zone (staff and managers only)."""
     return await service.current_occupancy()
 
 
 @router.post(
-    "/device-check-in", response_model=AccessLogResponse, status_code=status.HTTP_201_CREATED
+    "/device-check-in",
+    response_model=AccessLogResponse,
+    status_code=status.HTTP_201_CREATED,
+    description="Record a trusted scanner check-in.",
 )
 async def device_check_in(
     payload: DeviceCheckInRequest,
+    session: DbSessionDep,
     service: AccessServiceDependency,
     zone: ScannerZone,
 ) -> Any:
-    """Called by a face-recognition door scanner after it has recognised a member.
-
-    The scanner identifies itself with its secret key in the X-Device-Key header; the
-    zone comes from the scanner, so a door can only let people into its own room.
-    """
+    result = None
     try:
-        access_log = await service.check_in(payload.member_id, zone, source="face_recognition")
+        result = await service.check_in(payload.member_id, zone, source="face_recognition")
+        await session.commit()
     except ZoneFullError as error:
+        await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except ValueError as error:
+        await session.rollback()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
-    return access_log
+    except Exception:
+        await session.rollback()
+        if result is not None and result.took_new_place:
+            await service.release_place(payload.member_id, zone)
+        raise
+    return result.access_log
 
 
-@router.get("/waitlist/{zone}", response_model=WaitlistPositionResponse)
+@router.get(
+    "/waitlist/{zone}",
+    response_model=WaitlistPositionResponse,
+    description="Get your zone waitlist position.",
+)
 async def my_waitlist_position(
     zone: AccessZone,
     service: AccessServiceDependency,
     current_user: CurrentUser,
 ) -> Any:
-    """The signed-in member's place on a room's waiting list (null when not on it)."""
     position = await service.waitlist_position(current_user.id, zone)
     return {"zone": zone, "position": position}
 
 
-@router.delete("/waitlist/{zone}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/waitlist/{zone}", status_code=status.HTTP_204_NO_CONTENT, description="Leave a zone waitlist."
+)
 async def leave_waitlist(
     zone: AccessZone,
     service: AccessServiceDependency,

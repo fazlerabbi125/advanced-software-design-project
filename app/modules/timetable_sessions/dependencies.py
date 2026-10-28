@@ -2,11 +2,11 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from app.core.dependencies import DbSession
-from app.modules.sessions.service import TimetableService
+from app.core.dependencies import DbSessionDep
+from app.modules.timetable_sessions.service import TimetableService
 
 
-def get_timetable_service(session: DbSession) -> TimetableService:
+def get_timetable_service(session: DbSessionDep) -> TimetableService:
     return TimetableService(session)
 
 

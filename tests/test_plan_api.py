@@ -67,7 +67,7 @@ class PlanManagementApiTests(unittest.TestCase):
         # Import the router with test-only settings; overridden dependencies never connect.
         with patch.dict(os.environ, TEST_ENVIRONMENT):
             from app.modules.auth.dependencies import get_current_user
-            from app.modules.memberships.api_v1 import router
+            from app.modules.memberships.endpoints.v1 import router
             from app.modules.memberships.dependencies import get_membership_service
         self.service = AsyncMock()
         self.service.create_plan.return_value = stored_plan()
