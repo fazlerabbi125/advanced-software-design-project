@@ -36,7 +36,7 @@ class MembershipPlan(Base, IdMixin, TimestampMixin):
     __table_args__ = (
         sa.CheckConstraint("booking_window_days >= 0", name="booking_window_nonnegative"),
         sa.CheckConstraint("weekly_booking_limit >= 0", name="weekly_limit_nonnegative"),
-        sa.Index("uq_membership_plans_name_ci", sa.func.lower("name"), unique=True),
+        sa.Index("uq_membership_plans_name_ci", sa.text("lower(name)"), unique=True),
     )
 
     name: Mapped[str] = mapped_column(sa.String(100))

@@ -21,9 +21,7 @@ class EquipmentUnit(Base, IdMixin, TimestampMixin):
     """A registered piece of bookable equipment, such as Squat Rack 2."""
 
     __tablename__ = "equipment_units"
-    __table_args__ = (
-        sa.Index("uq_equipment_units_name_ci", sa.func.lower("name"), unique=True),
-    )
+    __table_args__ = (sa.Index("uq_equipment_units_name_ci", sa.text("lower(name)"), unique=True),)
 
     name: Mapped[str] = mapped_column(sa.String(150))
     # Units of the same type can stand in for each other when one leaves service.
