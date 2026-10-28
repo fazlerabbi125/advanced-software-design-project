@@ -6,25 +6,34 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
-from app.core.database import close_engine, is_database_available
+from app.core.database import close_db_engine, is_db_available
 from app.core.exceptions import install_exception_handlers
 from app.core.redis import close_redis_client, is_cache_redis_available
-from app.utils.constants import HEALTH_CHECK_TIMEOUT_SECONDS
+from app.core.scheduler import create_scheduler
+from app.modules.memberships.payment_gateway import PaymentGatewayFactory
+from app.shared.constants import HEALTH_CHECK_TIMEOUT_SECONDS
 
 settings = get_settings()
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(application: FastAPI):
+    scheduler = create_scheduler() if settings.enable_booking_jobs else None
+    payment_gateway = PaymentGatewayFactory.create(settings)
+    application.state.payment_gateway = payment_gateway
+    if scheduler is not None:
+        scheduler.start()
     try:
         yield
     finally:
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)
+        await payment_gateway.aclose()
         await close_redis_client()
-        await close_engine()
+        await close_db_engine()
 
 
-app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
-install_exception_handlers(app)
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.enable_debug else settings.cors_allow_origins,
@@ -32,16 +41,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+install_exception_handlers(app)
 app.include_router(api_router)
 
 
-@app.get("/health", tags=["health"])
+@app.get(
+    "/health",
+    tags=["health"],
+    description="Report whether required infrastructure is reachable.",
+)
 async def health_check() -> dict[str, str]:
-    """Returns 200 when both PostgreSQL and Redis are reachable."""
     try:
         database_available, cache_redis_available = await wait_for(
             gather(
-                is_database_available(),
+                is_db_available(),
                 is_cache_redis_available(),
             ),
             timeout=HEALTH_CHECK_TIMEOUT_SECONDS,

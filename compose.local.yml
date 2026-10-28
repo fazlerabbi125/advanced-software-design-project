@@ -17,3 +17,21 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # Optional local-development webhook listener. The API runs on the host when
+  # using this Compose file, so the Stripe CLI forwards through Docker Desktop
+  # to the host rather than to the ``api`` service in compose.yml.
+  #
+  # Start with:
+  #   docker compose -f compose.local.yml --profile stripe up -d
+  # Then copy the ``whsec_...`` value from this service's logs into .env and
+  # restart the host-run FastAPI process.
+  stripe-listener:
+    image: stripe/stripe-cli:v1.51.0
+    profiles: [stripe]
+    environment:
+      STRIPE_API_KEY: ${STRIPE_SECRET_KEY}
+    command: >
+      listen
+      --all-snapshot
+      --forward-to http://host.docker.internal:8000/api/v1/payments/stripe/webhook

@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import date
 from enum import StrEnum
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, IdMixin, TimestampMixin
+from app.models.base import ASYNC_CASCADE, Base, IdMixin, TimestampMixin, enum_values
 
 if TYPE_CHECKING:
     from app.models.auth import User
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 class MembershipStatus(StrEnum):
     ACTIVE = "active"
     EXPIRED = "expired"
+    PENDING = "pending"
     CANCELLED = "cancelled"
 
 
@@ -34,9 +36,10 @@ class MembershipPlan(Base, IdMixin, TimestampMixin):
     __table_args__ = (
         sa.CheckConstraint("booking_window_days >= 0", name="booking_window_nonnegative"),
         sa.CheckConstraint("weekly_booking_limit >= 0", name="weekly_limit_nonnegative"),
+        sa.Index("uq_membership_plans_name_ci", sa.func.lower(sa.column("name")), unique=True),
     )
 
-    name: Mapped[str] = mapped_column(sa.String(100), unique=True)
+    name: Mapped[str] = mapped_column(sa.String(100))
     is_active: Mapped[bool] = mapped_column(default=True)
     price_minor: Mapped[int] = mapped_column(sa.Integer)
     currency: Mapped[str] = mapped_column(sa.String(3), default="EUR", server_default="EUR")
@@ -45,7 +48,7 @@ class MembershipPlan(Base, IdMixin, TimestampMixin):
     weekly_booking_limit: Mapped[int] = mapped_column(default=3, server_default="3")
     memberships: Mapped[list[Membership]] = relationship(back_populates="plan")
     entitlements: Mapped[list[PlanEntitlement]] = relationship(
-        back_populates="plan", cascade="all, delete-orphan"
+        back_populates="plan", cascade=ASYNC_CASCADE, passive_deletes=True
     )
 
 
@@ -62,6 +65,7 @@ class PlanEntitlement(Base, IdMixin, TimestampMixin):
             name="membership_entitlement",
             native_enum=False,
             create_constraint=True,
+            values_callable=enum_values,
         )
     )
     plan: Mapped[MembershipPlan] = relationship(back_populates="entitlements")
@@ -70,16 +74,42 @@ class PlanEntitlement(Base, IdMixin, TimestampMixin):
 class Membership(Base, IdMixin, TimestampMixin):
     __tablename__ = "memberships"
 
-    user_id: Mapped[int] = mapped_column(sa.ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    user_id: Mapped[UUID] = mapped_column(
+        sa.Uuid(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     plan_id: Mapped[int] = mapped_column(sa.ForeignKey("membership_plans.id", ondelete="RESTRICT"))
     status: Mapped[MembershipStatus] = mapped_column(
         sa.Enum(
-            MembershipStatus, name="membership_status", native_enum=False, create_constraint=True
+            MembershipStatus,
+            name="membership_status",
+            native_enum=False,
+            create_constraint=True,
+            values_callable=enum_values,
         ),
         default=MembershipStatus.ACTIVE,
     )
     starts_on: Mapped[date] = mapped_column(sa.Date)
     ends_on: Mapped[date] = mapped_column(sa.Date, index=True)
-    payment_reference: Mapped[str | None] = mapped_column(sa.String(64), unique=True)
+    payment_reference: Mapped[str | None] = mapped_column(sa.String(255), unique=True)
+    stripe_session_id: Mapped[str | None] = mapped_column(sa.String(255), unique=True)
     user: Mapped[User] = relationship(back_populates="memberships")
     plan: Mapped[MembershipPlan] = relationship(back_populates="memberships")
+    stripe_events: Mapped[list[StripeEvent]] = relationship(
+        back_populates="membership", cascade=ASYNC_CASCADE, passive_deletes=True
+    )
+
+
+class StripeEvent(Base, IdMixin, TimestampMixin):
+    """A verified Stripe event processed by this API.
+
+    The Stripe event ID is the idempotency key. A successful Checkout event is
+    recorded in the same transaction that activates its pending membership.
+    """
+
+    __tablename__ = "stripe_events"
+
+    stripe_event_id: Mapped[str] = mapped_column(sa.String(255), unique=True)
+    membership_id: Mapped[int] = mapped_column(
+        sa.ForeignKey("memberships.id", ondelete="CASCADE"), index=True
+    )
+    membership: Mapped[Membership] = relationship(back_populates="stripe_events")

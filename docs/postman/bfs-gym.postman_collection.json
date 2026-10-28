@@ -7,7 +7,17 @@
     { "key": "baseUrl", "value": "http://localhost:8000/api/v1" },
     { "key": "accessToken", "value": "" },
     { "key": "refreshToken", "value": "" },
-    { "key": "deviceKey", "value": "test-sauna-key" }
+    { "key": "memberId", "value": "" },
+    { "key": "planId", "value": "1" },
+    { "key": "checkoutUrl", "value": "" },
+    { "key": "stripeSessionId", "value": "" },
+    { "key": "deviceKey", "value": "test-sauna-key" },
+    { "key": "biometricTemplateId", "value": "" },
+    { "key": "sessionId", "value": "1" },
+    { "key": "bookingId", "value": "1" },
+    { "key": "waitlistEntryId", "value": "1" },
+    { "key": "equipmentUnitId", "value": "1" },
+    { "key": "faultId", "value": "1" }
   ],
   "item": [
     {
@@ -18,7 +28,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"email\": \"member@example.com\",\n  \"password\": \"correct-horse-battery-staple\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"member@example.com\",\n  \"password\": \"correct-horse-battery-staple\",\n  \"name\": \"Example Member\"\n}" },
             "url": "{{baseUrl}}/auth/register"
           }
         },
@@ -29,7 +39,18 @@
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": { "mode": "raw", "raw": "{\n  \"email\": \"member@example.com\",\n  \"password\": \"correct-horse-battery-staple\"\n}" },
             "url": "{{baseUrl}}/auth/login"
-          }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.collectionVariables.set('accessToken', body.access_token);",
+                "pm.collectionVariables.set('refreshToken', body.refresh_token);"
+              ]
+            }
+          }]
         },
         {
           "name": "Refresh token",
@@ -47,12 +68,22 @@
       "item": [
         {
           "name": "Upload biometric image",
+          "description": "Upload a PNG, image/jpeg, or image/jpg photo at least 300x300 pixels with one visible frontal face. Rejected files return 422 and are not stored.",
           "request": {
             "method": "POST",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
             "body": { "mode": "formdata", "formdata": [{ "key": "image", "type": "file", "src": "" }] },
             "url": "{{baseUrl}}/members/me/biometric-image"
-          }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.collectionVariables.set('biometricTemplateId', pm.response.json().template_id);"
+              ]
+            }
+          }]
         },
         {
           "name": "My memberships",
@@ -78,9 +109,20 @@
               { "key": "Authorization", "value": "Bearer {{accessToken}}" },
               { "key": "Content-Type", "value": "application/json" }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"plan_id\": 3\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"plan_id\": {{planId}}\n}" },
             "url": "{{baseUrl}}/memberships/purchase"
-          }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.collectionVariables.set('checkoutUrl', body.checkout_url);",
+                "pm.collectionVariables.set('stripeSessionId', body.payment_reference);"
+              ]
+            }
+          }]
         },
         {
           "name": "Renew my membership",
@@ -101,6 +143,102 @@
       ]
     },
     {
+      "name": "Stripe Checkout",
+      "description": "Start the listener first: docker compose -f compose.local.yml --env-file .env --profile stripe up -d. Copy its whsec_ value into STRIPE_WEBHOOK_SECRET and restart FastAPI. Send a Checkout request, open {{checkoutUrl}}, complete it with Stripe test data, then call Members / My memberships. Do not send real webhook events from Postman: Stripe CLI forwards signed events.",
+      "item": [
+        {
+          "name": "Create Checkout (purchase)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"plan_id\": {{planId}}\n}" },
+            "url": "{{baseUrl}}/memberships/purchase"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "const body = pm.response.json();",
+                "pm.collectionVariables.set('checkoutUrl', body.checkout_url);",
+                "pm.collectionVariables.set('stripeSessionId', body.payment_reference);"
+              ]
+            }
+          }]
+        },
+        {
+          "name": "Create Checkout (renewal)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/memberships/me/renew"
+          }
+        },
+        {
+          "name": "Unsigned webhook is rejected (expected 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Stripe-Signature", "value": "invalid" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}/payments/stripe/webhook"
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": ["pm.test('unsigned webhook is rejected', () => pm.response.to.have.status(400));"]
+            }
+          }]
+        }
+      ]
+    },
+    {
+      "name": "Timetable sessions",
+      "item": [
+        {
+          "name": "Create session (staff or manager)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resource_name\": \"Spin class\",\n  \"resource_type\": \"class\",\n  \"starts_at\": \"2026-11-02T18:00:00Z\",\n  \"ends_at\": \"2026-11-02T18:45:00Z\",\n  \"capacity\": 12\n}" },
+            "url": "{{baseUrl}}/sessions"
+          }
+        },
+        {
+          "name": "Create equipment slot (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"resource_name\": \"Squat Rack 2\",\n  \"resource_type\": \"equipment\",\n  \"starts_at\": \"2026-11-02T18:00:00Z\",\n  \"ends_at\": \"2026-11-02T18:30:00Z\",\n  \"capacity\": 1,\n  \"equipment_unit_id\": {{equipmentUnitId}}\n}" },
+            "url": "{{baseUrl}}/sessions"
+          }
+        },
+        {
+          "name": "Generate equipment slots (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"equipment_unit_id\": {{equipmentUnitId}},\n  \"starts_at\": \"2026-11-02T06:00:00Z\",\n  \"ends_at\": \"2026-11-02T22:00:00Z\",\n  \"slot_minutes\": 30\n}" },
+            "url": "{{baseUrl}}/sessions/equipment-slots"
+          }
+        },
+        {
+          "name": "Upcoming sessions",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/sessions"
+          }
+        }
+      ]
+    },
+    {
       "name": "Bookings",
       "item": [
         {
@@ -108,8 +246,32 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"resource_name\": \"Pool lane 1\",\n  \"resource_type\": \"pool\",\n  \"starts_at\": \"2026-11-01T10:00:00Z\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"timetable_session_id\": {{sessionId}}\n}" },
             "url": "{{baseUrl}}/bookings"
+          }
+        },
+        {
+          "name": "Check in to booking",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/bookings/{{bookingId}}/check-in"
+          }
+        },
+        {
+          "name": "My waiting lists and offers",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/bookings/waitlist/me"
+          }
+        },
+        {
+          "name": "Accept waitlist offer",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/bookings/waitlist/{{waitlistEntryId}}/accept"
           }
         },
         {
@@ -135,6 +297,15 @@
           }
         },
         {
+          "name": "Manual check-in (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"member_id\": \"{{memberId}}\",\n  \"zone\": \"gym_floor\",\n  \"reason\": \"Scanner offline, photo ID checked\"\n}" },
+            "url": "{{baseUrl}}/access/manual-check-in"
+          }
+        },
+        {
           "name": "Check out",
           "request": {
             "method": "POST",
@@ -148,7 +319,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "X-Device-Key", "value": "{{deviceKey}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"member_id\": 3\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"template_id\": \"{{biometricTemplateId}}\",\n  \"confidence\": 0.92\n}" },
             "url": "{{baseUrl}}/access/device-check-in"
           }
         },
@@ -174,6 +345,108 @@
             "method": "GET",
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
             "url": "{{baseUrl}}/access/occupancy"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Manager",
+      "item": [
+        {
+          "name": "All plans, including off sale",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/memberships/plans/all"
+          }
+        },
+        {
+          "name": "Create plan",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Student\",\n  \"price_minor\": 2500,\n  \"currency\": \"EUR\",\n  \"duration_days\": 30,\n  \"booking_window_days\": 2,\n  \"weekly_booking_limit\": 4,\n  \"entitlements\": [\"gym_floor_access\", \"class_booking\"]\n}" },
+            "url": "{{baseUrl}}/memberships/plans"
+          }
+        },
+        {
+          "name": "Update plan",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"weekly_booking_limit\": 6,\n  \"entitlements\": [\"gym_floor_access\", \"class_booking\", \"pool_booking\"]\n}" },
+            "url": "{{baseUrl}}/memberships/plans/4"
+          }
+        },
+        {
+          "name": "Take plan off sale",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/memberships/plans/4"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Equipment",
+      "item": [
+        {
+          "name": "List equipment",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/equipment"
+          }
+        },
+        {
+          "name": "Register unit (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Squat Rack 2\",\n  \"equipment_type\": \"squat rack\",\n  \"zone\": \"gym_floor\"\n}" },
+            "url": "{{baseUrl}}/equipment"
+          }
+        },
+        {
+          "name": "Report fault",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"description\": \"The safety catch on the left side is bent\"\n}" },
+            "url": "{{baseUrl}}/equipment/{{equipmentUnitId}}/faults"
+          }
+        },
+        {
+          "name": "List reported faults (staff)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/equipment/faults?status=reported"
+          }
+        },
+        {
+          "name": "Confirm fault (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/equipment/faults/{{faultId}}/confirm"
+          }
+        },
+        {
+          "name": "Dismiss fault (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/equipment/faults/{{faultId}}/dismiss"
+          }
+        },
+        {
+          "name": "Resolve fault (staff)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/equipment/faults/{{faultId}}/resolve"
           }
         }
       ]

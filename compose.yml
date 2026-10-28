@@ -76,13 +76,15 @@ services:
   # Start with:  docker compose --profile stripe up
   #
   # After startup, copy the "whsec_..." signing secret printed in the logs and
-  # set STRIPE_WEBHOOK_SECRET in .env.docker, then restart the api service.
+  # set STRIPE_WEBHOOK_SECRET in .env.docker, then recreate the api service.
   stripe-listener:
-    image: stripe/stripe-cli:latest
+    image: stripe/stripe-cli:v1.51.0
     profiles: [stripe]
+    environment:
+      STRIPE_API_KEY: ${STRIPE_SECRET_KEY}
     command: >
       listen
-      --api-key ${STRIPE_SECRET_KEY}
+      --all-snapshot
       --forward-to http://api:8000/api/v1/payments/stripe/webhook
     depends_on:
       api:

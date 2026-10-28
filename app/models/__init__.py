@@ -1,4 +1,10 @@
-from app.models.access import AccessEvent, AccessLog, AccessZone
+from app.models.access import (
+    AccessEvent,
+    AccessLog,
+    AccessZone,
+    DeniedAccessAttempt,
+    DeniedAccessReason,
+)
 from app.models.auth import RefreshToken, User, UserRole
 from app.models.base import Base, IdMixin, TimestampMixin
 from app.models.bookings import (
@@ -8,6 +14,7 @@ from app.models.bookings import (
     WaitlistEntry,
     WaitlistStatus,
 )
+from app.models.facilities import EquipmentFault, EquipmentUnit, FaultStatus
 from app.models.members import MemberProfile
 from app.models.memberships import (
     Membership,
@@ -15,7 +22,10 @@ from app.models.memberships import (
     MembershipPlan,
     MembershipStatus,
     PlanEntitlement,
+    StripeEvent,
 )
+from app.models.notifications import Notification, NotificationType
+from app.models.timetable_sessions import TimetableSession
 
 __all__ = [
     "AccessEvent",
@@ -25,13 +35,22 @@ __all__ = [
     "Booking",
     "BookingResourceType",
     "BookingStatus",
+    "DeniedAccessAttempt",
+    "DeniedAccessReason",
+    "EquipmentFault",
+    "EquipmentUnit",
+    "FaultStatus",
     "MemberProfile",
     "Membership",
     "MembershipEntitlement",
     "MembershipPlan",
     "MembershipStatus",
+    "Notification",
+    "NotificationType",
     "PlanEntitlement",
+    "StripeEvent",
     "RefreshToken",
+    "TimetableSession",
     "IdMixin",
     "TimestampMixin",
     "User",
