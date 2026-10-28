@@ -10,6 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.config import Settings, get_settings
 from app.core.dependencies import DbSessionDep
+from app.modules.notifications.dependencies import (
+    NotificationObserverDependency,
+    NotificationPublisherDependency,
+)
 from app.modules.payments.dependencies import StripeWebhookServiceDependency
 
 logger = logging.getLogger(__name__)
@@ -26,6 +30,8 @@ async def stripe_webhook(
     request: Request,
     session: DbSessionDep,
     service: StripeWebhookServiceDependency,
+    notifications: NotificationObserverDependency,
+    publisher: NotificationPublisherDependency,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, str]:
     # Stripe signs these exact bytes; verification must happen before parsing.
@@ -72,6 +78,7 @@ async def stripe_webhook(
             payment_succeeded=payment_succeeded,
         )
         await session.commit()
+        await publisher.publish_many(notifications.drain())
     except Exception:
         await session.rollback()
         raise

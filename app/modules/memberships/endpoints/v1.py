@@ -23,6 +23,10 @@ from app.modules.memberships.service import (
     PlanNotFoundError,
 )
 from app.modules.memberships.states import MembershipActionError
+from app.modules.notifications.dependencies import (
+    NotificationObserverDependency,
+    NotificationPublisherDependency,
+)
 
 router = APIRouter(prefix="/memberships", tags=["memberships"])
 
@@ -158,7 +162,11 @@ async def list_my_memberships(
     "/me/cancel", response_model=MembershipResponse, description="Cancel your latest membership."
 )
 async def cancel_my_membership(
-    current_user: CurrentUser, session: DbSessionDep, service: MembershipServiceDependency
+    current_user: CurrentUser,
+    session: DbSessionDep,
+    service: MembershipServiceDependency,
+    notifications: NotificationObserverDependency,
+    publisher: NotificationPublisherDependency,
 ) -> Any:
     try:
         membership = await service.cancel(current_user.id)
@@ -172,6 +180,7 @@ async def cancel_my_membership(
         await session.rollback()
         raise
     await session.commit()
+    await publisher.publish_many(notifications.drain())
     return membership
 
 
@@ -181,7 +190,11 @@ async def cancel_my_membership(
     description="Create Checkout for membership renewal.",
 )
 async def renew_my_membership(
-    current_user: CurrentUser, session: DbSessionDep, service: MembershipServiceDependency
+    current_user: CurrentUser,
+    session: DbSessionDep,
+    service: MembershipServiceDependency,
+    notifications: NotificationObserverDependency,
+    publisher: NotificationPublisherDependency,
 ) -> Any:
     try:
         result = await service.renew(current_user.id)
@@ -203,4 +216,5 @@ async def renew_my_membership(
         await session.rollback()
         raise
     await session.commit()
+    await publisher.publish_many(notifications.drain())
     return result

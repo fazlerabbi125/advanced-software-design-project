@@ -5,11 +5,16 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memberships import Membership, MembershipStatus, StripeEvent
+from app.models.notifications import NotificationType
+from app.modules.notifications.service import NotificationEvent, NotificationObserver
 
 
 class StripeWebhookService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, notifications: NotificationObserver | None = None
+    ) -> None:
         self.session = session
+        self.notifications = notifications
 
     async def process_checkout(
         self, *, stripe_event_id: str, stripe_session_id: str, payment_succeeded: bool
@@ -41,4 +46,17 @@ class StripeWebhookService:
         membership.status = (
             MembershipStatus.ACTIVE if payment_succeeded else MembershipStatus.CANCELLED
         )
+        if payment_succeeded and self.notifications is not None:
+            await self.notifications.observe(
+                NotificationEvent(
+                    user_id=membership.user_id,
+                    event_type=NotificationType.MEMBERSHIP_PAYMENT_CONFIRMED,
+                    payload={
+                        "membership_id": membership.id,
+                        "stripe_session_id": stripe_session_id,
+                        "starts_on": membership.starts_on.isoformat(),
+                        "ends_on": membership.ends_on.isoformat(),
+                    },
+                )
+            )
         return "activated" if payment_succeeded else "cancelled"

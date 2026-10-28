@@ -18,6 +18,7 @@ from app.models.memberships import (
     PlanEntitlement,
     StripeEvent,
 )
+from app.models.notifications import Notification, NotificationType
 from app.models.timetable_sessions import TimetableSession
 
 __all__ = [
@@ -36,6 +37,8 @@ __all__ = [
     "MembershipEntitlement",
     "MembershipPlan",
     "MembershipStatus",
+    "Notification",
+    "NotificationType",
     "PlanEntitlement",
     "StripeEvent",
     "RefreshToken",

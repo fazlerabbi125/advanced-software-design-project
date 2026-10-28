@@ -32,21 +32,17 @@ The business rules include membership plans with configurable booking windows an
 - VIP occupancy tracking, automatic waiting lists, and visit expiry using Redis sorted sets.
 - Scanner/device check-in with configurable device keys and zone-specific access policies.
 - Member biometric photo upload for enrolment reference.
-- In-app notification model with Redis Pub/Sub delivery and SSE streaming *(in progress)*.
-- **Optional AI Integrations**:
-  - **Feature A (Pydantic AI)**: Intelligent workout and class recommender using the Strategy pattern.
-  - **Feature C (Computer Vision)**: Biometric photo quality validation using the Chain of Responsibility pattern.
+- Durable in-app notifications, Redis Pub/Sub delivery, and authenticated SSE streaming.
 
 ## Design Patterns
 
 | Pattern | Where it is used | Status |
 |---|---|---|
 | **Strategy** | `GymFloorPolicy` and `VipAreaPolicy` in `app/modules/access/policies.py` — zone access policies | ✅ Implemented |
-| **Strategy (AI Extension)** | `RecommendationStrategy` (`PydanticAIStrategy`, `PopularityStrategy`) for class recommendations | 💡 Optional / Documented |
 | **Chain of Responsibility** | Booking eligibility rules in `app/modules/bookings/eligibility.py` — collect all validation failures | ✅ Implemented |
 | **Chain of Responsibility (Vision)** | `PhotoValidationHandler` chain in `app/modules/members/` — checks resolution, illumination, blur, and face presence | 💡 Optional / Documented |
 | **Factory Method** | `PaymentGatewayFactory.create(settings)` in `app/modules/memberships/payment_gateway.py` — payment provider factory | ✅ Implemented |
-| **Observer** | `NotificationPublisher` + Redis Pub/Sub + SSE endpoint — business events push notifications | 🔧 In progress |
+| **Observer** | `NotificationObserver` + `NotificationPublisher` in `app/modules/notifications/` — durable domain events push live notifications | ✅ Implemented |
 | **State** | `ActiveState`, `ExpiredState`, `CancelledState` in `app/modules/memberships/states.py` — membership lifecycle | ✅ Implemented |
 | **Builder** | `BookingContextBuilder` in `app/modules/bookings/builder.py` — assembles complex `BookingContext` for Chain of Responsibility | ✅ Implemented |
 
@@ -56,7 +52,7 @@ The project follows a **monolithic MVC/REST architecture**:
 
 - **Models** (`app/models/`) — SQLAlchemy ORM models define the database schema.
 - **Services** (`app/modules/*/service.py`) — contain all business logic; routers never query the database directly.
-- **Routers/Controllers** (`app/modules/*/api_v1.py`) — FastAPI route handlers that validate requests, call services, and return responses.
+- **Routers/Controllers** (`app/modules/*/endpoints/v1.py`) — FastAPI route handlers that validate requests, call services, and return responses.
 
 ### Data Models & Entity Relationships
 
@@ -70,16 +66,16 @@ erDiagram
     USER ||--o{ BOOKING : "reserves (1:N)"
     USER ||--o{ WAITLIST_ENTRY : "queues for (1:N)"
     USER ||--o{ ACCESS_LOG : "records (1:N)"
+    USER ||--o{ NOTIFICATION : "receives (1:N)"
 
     MEMBERSHIP_PLAN ||--|{ PLAN_ENTITLEMENT : "defines (1:N)"
     MEMBERSHIP_PLAN ||--o{ MEMBERSHIP : "specifies (1:N)"
 
     TIMETABLE_SESSION ||--o{ BOOKING : "allocates (1:N)"
     TIMETABLE_SESSION ||--o{ WAITLIST_ENTRY : "queues for (1:N)"
-    BOOKING ||--o{ WAITLIST_ENTRY : "manages (1:N)"
 
     USER {
-        int id PK
+        uuid id PK
         string email UK
         string password_hash
         enum role "member | staff | manager"
@@ -87,7 +83,9 @@ erDiagram
     }
     MEMBER_PROFILE {
         int id PK
-        int user_id FK,UK "1:1 unique"
+        uuid user_id FK,UK "1:1 unique"
+        string name
+        string phone "optional"
         date date_of_birth
         string biometric_image_key UK
         string biometric_content_type
@@ -110,9 +108,9 @@ erDiagram
     }
     MEMBERSHIP {
         int id PK
-        int user_id FK
+        uuid user_id FK
         int plan_id FK
-        enum status "active | expired | cancelled"
+        enum status "active | expired | pending | cancelled"
         date starts_on
         date ends_on
         string payment_reference UK
@@ -120,7 +118,7 @@ erDiagram
     TIMETABLE_SESSION {
         int id PK
         string resource_name
-        enum resource_type "class | pool | personal_training"
+        enum resource_type "class | pool | personal_training | equipment"
         timestamp starts_at
         timestamp ends_at
         int capacity
@@ -129,25 +127,24 @@ erDiagram
     }
     BOOKING {
         int id PK
-        int user_id FK
-        int session_id FK "optional"
+        uuid user_id FK
+        int timetable_session_id FK "optional"
         string resource_name
-        enum resource_type "class | pool | personal_training"
+        enum resource_type "class | pool | personal_training | equipment"
         timestamp starts_at
         timestamp ends_at "optional"
         enum status "confirmed | cancelled | checked_in | no_show"
     }
     WAITLIST_ENTRY {
         int id PK
-        int booking_id FK "optional"
-        int session_id FK "optional"
-        int user_id FK
+        int session_id FK
+        uuid user_id FK
         enum status "waiting | offered | accepted | expired"
         timestamp offered_at
     }
     ACCESS_LOG {
         int id PK
-        int member_id FK
+        uuid member_id FK
         enum event "check_in | check_out | manual_check_in"
         string zone
         timestamp occurred_at
@@ -155,12 +152,20 @@ erDiagram
     }
     REFRESH_TOKEN {
         int id PK
-        int user_id FK
-        string token_hash UK
+        uuid user_id FK
         string jti UK
         string family_id
         timestamp expires_at
         timestamp revoked_at
+    }
+    NOTIFICATION {
+        int id PK
+        uuid user_id FK
+        enum event_type
+        json payload
+        boolean is_read
+        timestamp read_at
+        timestamp created_at
     }
 ```
 
@@ -168,23 +173,24 @@ erDiagram
 
 | Parent Model | Relationship | Child Model | Foreign Key / Constraint | Cascade / On-Delete | Description |
 |---|---|---|---|---|---|
-| `User` | **1 : 1 (Optional)** | `MemberProfile` | `member_profiles.user_id` (Unique) | `RESTRICT` (orphan-removal in ORM) | One-to-one link storing date of birth and biometric photo keys for facial verification. |
+| `User` | **1 : 1 (Optional)** | `MemberProfile` | `member_profiles.user_id` (Unique) | `CASCADE` (orphan-removal in ORM) | One-to-one member name, phone, and biometric-photo reference. |
 | `User` | **1 : N** | `RefreshToken` | `refresh_tokens.user_id` | `CASCADE` | Stores rotating JWT refresh tokens with family tracking and revocation. |
-| `User` | **1 : N** | `Membership` | `memberships.user_id` | `RESTRICT` | Tracks past, current, and renewed membership contracts per member. |
-| `User` | **1 : N** | `Booking` | `bookings.user_id` | `RESTRICT` | Active and historical facility reservations made by the member. |
-| `User` | **1 : N** | `WaitlistEntry` | `waitlist_entries.user_id` | `RESTRICT` | Tracks session waitlist positions requested by the member. |
-| `User` | **1 : N** | `AccessLog` | `access_logs.member_id` | `None` (Audit Log) | Immutable historical audit trail of turnstile check-ins and check-outs. |
+| `User` | **1 : N** | `Membership` | `memberships.user_id` | `CASCADE` | Tracks past, current, and renewed membership contracts per member. |
+| `User` | **1 : N** | `Booking` | `bookings.user_id` | `CASCADE` | Active and historical facility reservations made by the member. |
+| `User` | **1 : N** | `WaitlistEntry` | `waitlist_entries.user_id` | `CASCADE` | Tracks session waitlist positions requested by the member. |
+| `User` | **1 : N** | `AccessLog` | `access_logs.member_id` | `CASCADE` | Physical-access history retained while the account exists. |
+| `User` | **1 : N** | `Notification` | `notifications.user_id` | `CASCADE` | Durable in-app event history with read state. |
 | `MembershipPlan` | **1 : N** | `PlanEntitlement` | `plan_entitlements.plan_id` | `CASCADE` (delete-orphan) | Defines feature privileges (e.g., VIP sauna access, pool bookings) granted by each plan tier. Unique on `(plan_id, entitlement)`. |
 | `MembershipPlan` | **1 : N** | `Membership` | `memberships.plan_id` | `RESTRICT` | Associates purchased memberships with their parent plan rules (pricing, booking window, weekly limits). |
-| `TimetableSession` | **1 : N** | `Booking` | `bookings.session_id` | `RESTRICT` | Links member bookings to scheduled classes, pool slots, or personal training blocks. |
+| `TimetableSession` | **1 : N** | `Booking` | `bookings.timetable_session_id` | `RESTRICT` | Links member bookings to scheduled classes, pool slots, personal training blocks, or equipment slots. |
 | `TimetableSession` | **1 : N** | `WaitlistEntry` | `waitlist_entries.session_id` | `RESTRICT` | Queue of members waiting for spots on full timetable sessions. Unique on `(session_id, user_id)`. |
-| `Booking` | **1 : N** | `WaitlistEntry` | `waitlist_entries.booking_id` | `RESTRICT` | Legacy queue linked directly to ad-hoc bookings. Unique on `(booking_id, user_id)`. |
 
 ## Why No External Cloud AI for Door Scanners
 
 The biometric scanner feature uses **offline face comparison** (a local Python library, no external API key). Real gym door scanners have embedded face-recognition chips. Our API trusts the scanner's result (device key + template ID + confidence score) and enforces the business rules — it does not need to replicate face recognition in an external AI service.
 
-Application-level AI extensions (such as **Pydantic AI** for workout recommendations and **OpenCV** for enrolment photo quality checks) are designed as decoupled, pluggable strategies with deterministic fallbacks to preserve system reliability and testability. See [Implementation Guide](docs/implementation-guide.md#optional-ai-features) for full code examples.
+Optional biometric enrolment-photo quality validation may use local OpenCV checks. It is separate from
+scanner-owned recognition and does not require Pydantic AI or an external AI API key.
 
 ## Why No Celery
 
@@ -277,6 +283,27 @@ docker compose -f compose.local.yml --env-file .env --profile stripe logs -f str
 
 Copy the displayed `whsec_...` value into `.env` and restart the host-run FastAPI process.
 
+### Test in-app notifications from Swagger, Postman, or curl
+
+Redis must be running (`cache-redis` from either Compose file) before testing notifications.
+
+1. Register and log in as a member. In Swagger, click **Authorize** and enter `Bearer <access token>`.
+2. In a second terminal, keep the authenticated stream open with curl:
+
+   ```powershell
+   curl.exe -N -H "Authorization: Bearer <access token>" http://localhost:8000/api/v1/notifications/stream
+   ```
+
+   Swagger documents the endpoint but does not continuously render an SSE stream. In Postman, create a
+   `GET /api/v1/notifications/stream` request with `Authorization: Bearer {{accessToken}}` and use its
+   streaming response view. Do not put a JWT in the URL.
+3. In Swagger or Postman, create/cancel a booking, accept a waitlist offer, cancel/renew membership, or
+   complete a Stripe Checkout payment. The stream returns `event: notification` with a JSON payload and
+   notification ID.
+4. Copy that ID and call `PATCH /api/v1/notifications/{notification_id}/read` with the same member token.
+   A different member receives `404`. Reconnect the stream to replay unread rows; clients should deduplicate
+   messages by notification ID.
+
 To apply a new migration:
 
 ```powershell
@@ -300,7 +327,7 @@ uv run ruff format --check .
 | Strategy pattern | `app/modules/access/policies.py` |
 | Chain of Responsibility pattern | `app/modules/bookings/eligibility.py` |
 | Factory Method pattern | `app/modules/memberships/payment_gateway.py` |
-| Observer pattern | `app/modules/notifications/` *(in progress)* |
+| Observer pattern | `app/modules/notifications/` |
 | State pattern | `app/modules/memberships/states.py` |
 | Builder pattern | `app/modules/bookings/builder.py` |
 | Automated tests | `tests/` directory (Unit, Integration, and DB tests) |

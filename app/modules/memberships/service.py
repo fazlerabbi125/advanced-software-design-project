@@ -15,8 +15,10 @@ from app.models.memberships import (
     MembershipStatus,
     PlanEntitlement,
 )
+from app.models.notifications import NotificationType
 from app.modules.memberships.payment_gateway import PaymentGateway, PaymentResult, PaymentStatus
 from app.modules.memberships.states import state_of
+from app.modules.notifications.service import NotificationEvent, NotificationObserver
 
 
 class PlanNotFoundError(ValueError):
@@ -66,10 +68,14 @@ class PurchaseResult:
 
 class MembershipService:
     def __init__(
-        self, session: AsyncSession, payment_gateway: PaymentGateway | None = None
+        self,
+        session: AsyncSession,
+        payment_gateway: PaymentGateway | None = None,
+        notifications: NotificationObserver | None = None,
     ) -> None:
         self.session = session
         self.payment_gateway = payment_gateway
+        self.notifications = notifications
 
     async def list_for_user(self, user_id: UUID) -> list[Membership]:
         statement = (
@@ -249,6 +255,11 @@ class MembershipService:
             state_of(membership, datetime.now(UTC).date()).cancel(membership)
         except ValueError:
             raise
+        await self._record(
+            user_id,
+            NotificationType.MEMBERSHIP_CANCELLED,
+            {"membership_id": membership.id, "ends_on": membership.ends_on.isoformat()},
+        )
         return membership
 
     async def renew(self, user_id: UUID) -> PurchaseResult:
@@ -297,7 +308,25 @@ class MembershipService:
         )
         self.session.add(membership)
         await self.session.flush()
+        await self._record(
+            user_id,
+            NotificationType.MEMBERSHIP_RENEWED,
+            {
+                "membership_id": membership.id,
+                "starts_on": membership.starts_on.isoformat(),
+                "ends_on": membership.ends_on.isoformat(),
+                "status": membership.status.value,
+            },
+        )
         return PurchaseResult(membership=membership, plan=plan, payment=payment)
+
+    async def _record(
+        self, user_id: UUID, event_type: NotificationType, payload: dict[str, object]
+    ) -> None:
+        if self.notifications is not None:
+            await self.notifications.observe(
+                NotificationEvent(user_id=user_id, event_type=event_type, payload=payload)
+            )
 
     async def lock_member(self, user_id: UUID) -> None:
         # Lock this member's row until the transaction ends, so two changes to the

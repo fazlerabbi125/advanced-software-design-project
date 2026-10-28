@@ -11,10 +11,12 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.redis import get_redis_client
 from app.models.bookings import Booking, BookingStatus, WaitlistEntry, WaitlistStatus
 from app.models.timetable_sessions import TimetableSession
 from app.modules.bookings.service import BookingService, check_in_deadline, offer_deadline
 from app.modules.memberships.service import MembershipService
+from app.modules.notifications.service import NotificationObserver, NotificationPublisher
 from app.shared.helpers import utc_now
 
 
@@ -39,7 +41,9 @@ async def expire_waitlist_offers(db: AsyncSession, now: datetime) -> int:
         )
     ).all()
     await db.rollback()
-    service = BookingService(db, MembershipService(db))
+    notifications = NotificationObserver(db)
+    publisher = NotificationPublisher(get_redis_client())
+    service = BookingService(db, MembershipService(db), notifications)
     expired = 0
     for session_id in session_ids:
         timetable_session = await _lock_session(db, session_id)
@@ -66,6 +70,7 @@ async def expire_waitlist_offers(db: AsyncSession, now: datetime) -> int:
             entry.status = WaitlistStatus.EXPIRED
         await service.release_places(timetable_session, len(lapsed), now)
         await db.commit()
+        await publisher.publish_many(notifications.drain())
         expired += len(lapsed)
     return expired
 
@@ -92,7 +97,9 @@ async def detect_no_shows(db: AsyncSession, now: datetime) -> int:
     for booking_id, session_id in candidates:
         by_session[session_id].append(booking_id)
 
-    service = BookingService(db, MembershipService(db))
+    notifications = NotificationObserver(db)
+    publisher = NotificationPublisher(get_redis_client())
+    service = BookingService(db, MembershipService(db), notifications)
     marked = 0
     for session_id, booking_ids in by_session.items():
         timetable_session = await _lock_session(db, session_id)
@@ -111,6 +118,7 @@ async def detect_no_shows(db: AsyncSession, now: datetime) -> int:
             booking.status = BookingStatus.NO_SHOW
         await service.release_places(timetable_session, len(missed), now)
         await db.commit()
+        await publisher.publish_many(notifications.drain())
         marked += len(missed)
     return marked
 

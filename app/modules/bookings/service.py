@@ -15,6 +15,7 @@ from app.models.bookings import (
     WaitlistStatus,
 )
 from app.models.facilities import EquipmentUnit
+from app.models.notifications import NotificationType
 from app.models.timetable_sessions import TimetableSession
 from app.modules.bookings.builder import BookingContextBuilder
 from app.modules.bookings.eligibility import (
@@ -23,6 +24,7 @@ from app.modules.bookings.eligibility import (
     build_eligibility_chain,
 )
 from app.modules.memberships.service import MembershipService
+from app.modules.notifications.service import NotificationEvent, NotificationObserver
 from app.shared.constants import (
     CHECK_IN_GRACE_MINUTES,
     CHECK_IN_OPENS_MINUTES,
@@ -111,9 +113,15 @@ def _same_slot(bookings: Sequence[Booking], timetable_session: TimetableSession)
 
 
 class BookingService:
-    def __init__(self, session: AsyncSession, memberships: MembershipService) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        memberships: MembershipService,
+        notifications: NotificationObserver | None = None,
+    ) -> None:
         self.session = session
         self.memberships = memberships
+        self.notifications = notifications
 
     async def create(self, user_id: UUID, timetable_session_id: int) -> Booking:
         timetable_session = await self._lock_session(timetable_session_id)
@@ -126,6 +134,7 @@ class BookingService:
             raise SessionFullError(await self._join_session_waitlist(user_id, timetable_session_id))
         booking = await self._booking_row(user_id, timetable_session, context.bookings)
         self._confirm(booking, timetable_session)
+        await self._record_booking(booking, NotificationType.BOOKING_CONFIRMED)
         return booking
 
     async def _lock_session(self, session_id: int) -> TimetableSession:
@@ -234,6 +243,17 @@ class BookingService:
         entry.offered_at = now
         timetable_session.allocated_count += 1
         await self.session.flush()
+        await self._record(
+            entry.user_id,
+            NotificationType.WAITLIST_OFFER_CREATED,
+            {
+                "waitlist_entry_id": entry.id,
+                "timetable_session_id": timetable_session.id,
+                "resource_name": timetable_session.resource_name,
+                "starts_at": timetable_session.starts_at.isoformat(),
+                "offer_expires_at": offer_deadline(now, timetable_session).isoformat(),
+            },
+        )
         return entry
 
     async def accept_offer(self, user_id: UUID, entry_id: int) -> Booking:
@@ -280,6 +300,7 @@ class BookingService:
         timetable_session.allocated_count -= 1
         self._confirm(booking, timetable_session)
         entry.status = WaitlistStatus.ACCEPTED
+        await self._record_booking(booking, NotificationType.BOOKING_CONFIRMED)
         return booking
 
     async def list_waitlist_for_user(self, user_id: UUID) -> list[WaitlistEntry]:
@@ -350,6 +371,7 @@ class BookingService:
             if timetable_session is not None:
                 await self.release_places(timetable_session, 1, utc_now())
         booking.status = BookingStatus.CANCELLED
+        await self._record_booking(booking, NotificationType.BOOKING_CANCELLED)
         return booking
 
     async def check_in(self, user_id: UUID, booking_id: int) -> Booking:
@@ -359,3 +381,24 @@ class BookingService:
             raise BookingStateError(problem)
         booking.status = BookingStatus.CHECKED_IN
         return booking
+
+    async def _record_booking(self, booking: Booking, event_type: NotificationType) -> None:
+        await self._record(
+            booking.user_id,
+            event_type,
+            {
+                "booking_id": booking.id,
+                "timetable_session_id": booking.timetable_session_id,
+                "resource_name": booking.resource_name,
+                "resource_type": booking.resource_type.value,
+                "starts_at": booking.starts_at.isoformat(),
+            },
+        )
+
+    async def _record(
+        self, user_id: UUID, event_type: NotificationType, payload: dict[str, object]
+    ) -> None:
+        if self.notifications is not None:
+            await self.notifications.observe(
+                NotificationEvent(user_id=user_id, event_type=event_type, payload=payload)
+            )
