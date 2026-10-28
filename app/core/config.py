@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Final, Literal
 
 from pydantic import Field, SecretStr
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
 from app.shared.constants import (
@@ -14,6 +14,12 @@ from app.shared.constants import (
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).resolve().parents[2] / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     app_name: str = "BFS Gym API"
     app_host: str = "127.0.0.1"
     app_port: int = 8000
