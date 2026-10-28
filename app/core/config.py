@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     cors_allow_origins: list[str] = Field(default_factory=list)
     upload_root: Path
     biometric_image_max_bytes: int = MAX_BIOMETRIC_IMAGE_BYTES
+    biometric_min_confidence: float = Field(default=0.80, ge=0, le=1)
     vip_room_capacity: int = Field(default=VIP_ROOM_CAPACITY, gt=0)
     # Secret key of each face-recognition door scanner, mapped to the zone its door opens.
     scanner_device_keys: dict[str, str] = Field(default_factory=dict)

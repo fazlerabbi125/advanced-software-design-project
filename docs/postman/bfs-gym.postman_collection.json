@@ -12,6 +12,7 @@
     { "key": "checkoutUrl", "value": "" },
     { "key": "stripeSessionId", "value": "" },
     { "key": "deviceKey", "value": "test-sauna-key" },
+    { "key": "biometricTemplateId", "value": "" },
     { "key": "sessionId", "value": "1" },
     { "key": "bookingId", "value": "1" },
     { "key": "waitlistEntryId", "value": "1" },
@@ -72,7 +73,16 @@
             "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
             "body": { "mode": "formdata", "formdata": [{ "key": "image", "type": "file", "src": "" }] },
             "url": "{{baseUrl}}/members/me/biometric-image"
-          }
+          },
+          "event": [{
+            "listen": "test",
+            "script": {
+              "type": "text/javascript",
+              "exec": [
+                "pm.collectionVariables.set('biometricTemplateId', pm.response.json().template_id);"
+              ]
+            }
+          }]
         },
         {
           "name": "My memberships",
@@ -308,7 +318,7 @@
           "request": {
             "method": "POST",
             "header": [{ "key": "X-Device-Key", "value": "{{deviceKey}}" }, { "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\n  \"member_id\": \"{{memberId}}\"\n}" },
+            "body": { "mode": "raw", "raw": "{\n  \"template_id\": \"{{biometricTemplateId}}\",\n  \"confidence\": 0.92\n}" },
             "url": "{{baseUrl}}/access/device-check-in"
           }
         },

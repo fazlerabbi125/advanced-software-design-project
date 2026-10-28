@@ -1,4 +1,10 @@
-from app.models.access import AccessEvent, AccessLog, AccessZone
+from app.models.access import (
+    AccessEvent,
+    AccessLog,
+    AccessZone,
+    DeniedAccessAttempt,
+    DeniedAccessReason,
+)
 from app.models.auth import RefreshToken, User, UserRole
 from app.models.base import Base, IdMixin, TimestampMixin
 from app.models.bookings import (
@@ -29,6 +35,8 @@ __all__ = [
     "Booking",
     "BookingResourceType",
     "BookingStatus",
+    "DeniedAccessAttempt",
+    "DeniedAccessReason",
     "EquipmentFault",
     "EquipmentUnit",
     "FaultStatus",
