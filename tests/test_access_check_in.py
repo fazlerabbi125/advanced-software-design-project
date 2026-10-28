@@ -17,7 +17,10 @@ class CheckInAccountTests(unittest.IsolatedAsyncioTestCase):
         policy = MagicMock()
         policy.check = AsyncMock(return_value=True)
         service = AccessService(
-            session, policies={AccessZone.VIP_SAUNA: policy}, occupancy=MagicMock()
+            session,
+            memberships=MagicMock(),
+            policies={AccessZone.VIP_SAUNA: policy},
+            occupancy=MagicMock(),
         )
         return service, session, policy
 
@@ -47,7 +50,7 @@ class CheckInAccountTests(unittest.IsolatedAsyncioTestCase):
         await service.check_in(3, AccessZone.VIP_SAUNA, source="face_recognition")
 
         policy.check.assert_awaited_once_with(3, AccessZone.VIP_SAUNA)
-        session.commit.assert_awaited_once()
+        session.commit.assert_not_awaited()
 
 
 class ManualCheckInTests(unittest.IsolatedAsyncioTestCase):

@@ -9,7 +9,7 @@ import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.config import Settings, get_settings
-from app.core.dependencies import DbSession
+from app.core.dependencies import DbSessionDep
 from app.modules.payments.dependencies import StripeWebhookServiceDependency
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 )
 async def stripe_webhook(
     request: Request,
-    session: DbSession,
+    session: DbSessionDep,
     service: StripeWebhookServiceDependency,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, str]:

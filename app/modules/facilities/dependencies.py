@@ -2,18 +2,18 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from app.core.dependencies import DbSession
+from app.core.dependencies import DbSessionDep
 from app.models.auth import User, UserRole
 from app.modules.auth.dependencies import require_roles
 from app.modules.bookings.outages import UnitOutageHandler
 from app.modules.facilities.service import FacilitiesService
 
 
-def get_facilities_service(session: DbSession) -> FacilitiesService:
+def get_facilities_service(session: DbSessionDep) -> FacilitiesService:
     return FacilitiesService(session)
 
 
-def get_outage_handler(session: DbSession) -> UnitOutageHandler:
+def get_outage_handler(session: DbSessionDep) -> UnitOutageHandler:
     return UnitOutageHandler(session)
 
 

@@ -1,13 +1,13 @@
 from fastapi import APIRouter
 
-from app.modules.access.api_v1 import router as access_router
-from app.modules.auth.api_v1 import router as auth_router
-from app.modules.bookings.api_v1 import router as bookings_router
-from app.modules.facilities.api_v1 import router as facilities_router
-from app.modules.members.api_v1 import router as members_router
-from app.modules.memberships.api_v1 import router as memberships_router
-from app.modules.payments.api_v1 import router as payments_router
-from app.modules.sessions.api_v1 import router as sessions_router
+from app.modules.access.endpoints.v1 import router as access_router
+from app.modules.auth.endpoints.v1 import router as auth_router
+from app.modules.bookings.endpoints.v1 import router as bookings_router
+from app.modules.facilities.endpoints.v1 import router as facilities_router
+from app.modules.members.endpoints.v1 import router as members_router
+from app.modules.memberships.endpoints.v1 import router as memberships_router
+from app.modules.payments.endpoints.v1 import router as payments_router
+from app.modules.timetable_sessions.endpoints.v1 import router as sessions_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)

@@ -16,7 +16,7 @@ class BookingApiTests(unittest.TestCase):
         # Import the router with test-only settings; overridden dependencies never connect.
         with patch.dict(os.environ, TEST_ENVIRONMENT):
             from app.modules.auth.dependencies import get_current_user
-            from app.modules.bookings.api_v1 import router
+            from app.modules.bookings.endpoints.v1 import router
             from app.modules.bookings.dependencies import get_booking_service
         service = AsyncMock()
         failures = [

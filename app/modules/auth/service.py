@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import (
@@ -44,8 +45,11 @@ class AuthService:
         )
         user.member_profile = MemberProfile(name=name, phone=phone)
         self.session.add(user)
-        await self.session.commit()
-        await self.session.refresh(user)
+        try:
+            await self.session.flush()
+        except IntegrityError as error:
+            # The database constraint closes the race between the earlier lookup and insert.
+            raise ValueError("email is already registered") from error
         return user
 
     async def get_user_by_id(self, user_id: str | UUID) -> User | None:
@@ -68,7 +72,7 @@ class AuthService:
         except (KeyError, ValueError) as error:
             raise ValueError("invalid refresh token") from error
         token_record = await self.session.scalar(
-            select(RefreshToken).where(RefreshToken.jti == jti)
+            select(RefreshToken).where(RefreshToken.jti == jti).with_for_update()
         )
         if (
             token_record is None
@@ -96,7 +100,7 @@ class AuthService:
                 expires_at=expires_at,
             )
         )
-        await self.session.commit()
+        await self.session.flush()
         return TokenPair(
             access_token=create_access_token(user.id, user.role.value),
             refresh_token=refresh_token,

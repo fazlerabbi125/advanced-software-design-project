@@ -35,6 +35,7 @@ from app.modules.bookings.service import (
     check_in_deadline,
     offer_deadline,
 )
+from app.modules.memberships.service import MembershipService
 from tests.test_booking_eligibility import NOW, membership
 
 CLASS = BookingResourceType.CLASS
@@ -135,7 +136,14 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
 
     async def book(self, session_id, user_id):
         async with self.sessions() as session:
-            return await BookingService(session).create(user_id, session_id)
+            service = BookingService(session, MembershipService(session))
+            try:
+                booking = await service.create(user_id, session_id)
+                await session.commit()
+                return booking
+            except SessionFullError:
+                await session.commit()
+                raise
 
     async def join_waitlist(self, session_id, user_id):
         with self.assertRaises(SessionFullError):
@@ -158,11 +166,22 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
 
     async def cancel_ann(self):
         async with self.sessions() as session:
-            await BookingService(session).cancel(self.ann, self.ann_booking.id)
+            await BookingService(session, MembershipService(session)).cancel(
+                self.ann, self.ann_booking.id
+            )
+            await session.commit()
 
     async def accept(self, user_id, entry_id):
         async with self.sessions() as session:
-            return await BookingService(session).accept_offer(user_id, entry_id)
+            service = BookingService(session, MembershipService(session))
+            try:
+                booking = await service.accept_offer(user_id, entry_id)
+                await session.commit()
+                return booking
+            except BookingEligibilityError as error:
+                if getattr(error, "commit_required", False):
+                    await session.commit()
+                raise
 
     async def state(self, session_id):
         """(allocated places, {member: waitlist status})."""

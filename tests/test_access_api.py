@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.models.access import AccessEvent, AccessLog, AccessZone
 from app.models.auth import User, UserRole
+from app.modules.access.service import CheckInResult
 from tests.settings import TEST_ENVIRONMENT
 
 
@@ -16,21 +17,24 @@ class ManualCheckInApiTests(unittest.TestCase):
     def setUp(self):
         # Import the router with test-only settings; overridden dependencies never connect.
         with patch.dict(os.environ, TEST_ENVIRONMENT):
-            from app.modules.access.api_v1 import router
+            from app.modules.access.endpoints.v1 import router
             from app.modules.access.dependencies import get_access_service
             from app.modules.auth.dependencies import get_current_user
         self.service = AsyncMock()
         self.member_id = uuid4()
         self.staff_id = uuid4()
-        self.service.check_in.return_value = AccessLog(
-            id=1,
-            member_id=self.member_id,
-            event=AccessEvent.MANUAL_CHECK_IN,
-            zone=AccessZone.VIP_SAUNA.value,
-            source="manual",
-            occurred_at=datetime(2026, 10, 26, 18, 0, tzinfo=UTC),
-            performed_by_staff_id=self.staff_id,
-            staff_reason="Scanner offline",
+        self.service.check_in.return_value = CheckInResult(
+            access_log=AccessLog(
+                id=1,
+                member_id=self.member_id,
+                event=AccessEvent.MANUAL_CHECK_IN,
+                zone=AccessZone.VIP_SAUNA.value,
+                source="manual",
+                occurred_at=datetime(2026, 10, 26, 18, 0, tzinfo=UTC),
+                performed_by_staff_id=self.staff_id,
+                staff_reason="Scanner offline",
+            ),
+            took_new_place=True,
         )
         self.current_user = User(id=self.staff_id, role=UserRole.STAFF)
         app = FastAPI()

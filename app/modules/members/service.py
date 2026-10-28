@@ -23,6 +23,5 @@ class MemberService:
         profile.biometric_image_key = stored_image.key
         profile.biometric_content_type = stored_image.content_type
         profile.biometric_uploaded_at = utc_now()
-        await self.session.commit()
-        await self.session.refresh(profile)
+        await self.session.flush()
         return profile
