@@ -31,7 +31,7 @@ The business rules include membership plans with configurable booking windows an
 - Booking creation, listing, cancellation, and eligibility feedback (active membership, plan entitlement, booking window, weekly limit, same-start conflict checks).
 - VIP occupancy tracking, automatic waiting lists, and visit expiry using Redis sorted sets.
 - Scanner/device check-in with indexed template lookup, confidence validation, denied-scan auditing, configurable device keys, and zone-specific access policies.
-- Member biometric photo upload for enrolment reference.
+- Member biometric photo upload with local image-quality and single-face validation.
 - Durable in-app notifications, Redis Pub/Sub delivery, and authenticated SSE streaming.
 
 ## Design Patterns
@@ -40,7 +40,7 @@ The business rules include membership plans with configurable booking windows an
 |---|---|---|
 | **Strategy** | `GymFloorPolicy` and `VipAreaPolicy` in `app/modules/access/policies.py` — zone access policies | ✅ Implemented |
 | **Chain of Responsibility** | Booking eligibility rules in `app/modules/bookings/eligibility.py` — collect all validation failures | ✅ Implemented |
-| **Chain of Responsibility (Vision)** | `PhotoValidationHandler` chain in `app/modules/members/` — checks resolution, illumination, blur, and face presence | 💡 Optional / Documented |
+| **Chain of Responsibility (Vision)** | `PhotoValidationHandler` chain in `app/modules/members/photo_validation.py` — checks image type, resolution, illumination, blur, and exactly one face | ✅ Implemented |
 | **Factory Method** | `PaymentGatewayFactory.create(settings)` in `app/modules/memberships/payment_gateway.py` — payment provider factory | ✅ Implemented |
 | **Observer** | `NotificationObserver` + `NotificationPublisher` in `app/modules/notifications/` — durable domain events push live notifications | ✅ Implemented |
 | **State** | `ActiveState`, `ExpiredState`, `CancelledState` in `app/modules/memberships/states.py` — membership lifecycle | ✅ Implemented |
@@ -199,8 +199,11 @@ erDiagram
 
 The biometric scanner feature uses scanner-owned matching (mocked for this project), with no external API key. The API accepts only a trusted device key, template ID, and confidence score; it performs one indexed profile lookup, applies business rules, and logs denied scans without retaining the raw device key.
 
-Optional biometric enrolment-photo quality validation may use local OpenCV checks. It is separate from
-scanner-owned recognition and does not require Pydantic AI or an external AI API key.
+Biometric enrolment uploads are checked locally before storage. The API accepts only `image/png`,
+`image/jpeg`, and `image/jpg`, verifies the matching PNG/JPEG bytes, requires at least 300×300 pixels,
+rejects unsuitable brightness or blur, and requires exactly one visible frontal face using OpenCV's
+bundled Haar cascade. It is separate from scanner-owned recognition and needs no Pydantic AI or
+external API key.
 
 ### Test biometric scanner check-in
 
