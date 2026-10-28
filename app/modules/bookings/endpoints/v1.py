@@ -18,6 +18,10 @@ from app.modules.bookings.service import (
     SessionNotFoundError,
     WaitlistEntryNotFoundError,
 )
+from app.modules.notifications.dependencies import (
+    NotificationObserverDependency,
+    NotificationPublisherDependency,
+)
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
@@ -40,6 +44,8 @@ async def create_booking(
     current_user: CurrentUser,
     session: DbSessionDep,
     service: BookingServiceDependency,
+    notifications: NotificationObserverDependency,
+    publisher: NotificationPublisherDependency,
 ) -> Any:
     try:
         booking = await service.create(current_user.id, payload.timetable_session_id)
@@ -48,6 +54,7 @@ async def create_booking(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except SessionFullError as error:
         await session.commit()
+        await publisher.publish_many(notifications.drain())
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except BookingStateError as error:
         await session.rollback()
@@ -59,6 +66,7 @@ async def create_booking(
         await session.rollback()
         raise
     await session.commit()
+    await publisher.publish_many(notifications.drain())
     return booking
 
 
@@ -84,6 +92,8 @@ async def accept_waitlist_offer(
     current_user: CurrentUser,
     session: DbSessionDep,
     service: BookingServiceDependency,
+    notifications: NotificationObserverDependency,
+    publisher: NotificationPublisherDependency,
 ) -> Any:
     try:
         booking = await service.accept_offer(current_user.id, entry_id)
@@ -96,6 +106,7 @@ async def accept_waitlist_offer(
     except BookingEligibilityError as error:
         if getattr(error, "commit_required", False):
             await session.commit()
+            await publisher.publish_many(notifications.drain())
         else:
             await session.rollback()
         raise eligibility_error(error) from error
@@ -103,6 +114,7 @@ async def accept_waitlist_offer(
         await session.rollback()
         raise
     await session.commit()
+    await publisher.publish_many(notifications.drain())
     return booking
 
 
@@ -143,6 +155,8 @@ async def cancel_booking(
     current_user: CurrentUser,
     session: DbSessionDep,
     service: BookingServiceDependency,
+    notifications: NotificationObserverDependency,
+    publisher: NotificationPublisherDependency,
 ) -> Any:
     try:
         booking = await service.cancel(current_user.id, booking_id)
@@ -156,4 +170,5 @@ async def cancel_booking(
         await session.rollback()
         raise
     await session.commit()
+    await publisher.publish_many(notifications.drain())
     return booking

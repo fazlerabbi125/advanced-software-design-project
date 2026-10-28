@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from app.models.bookings import Booking, WaitlistEntry
     from app.models.members import MemberProfile
     from app.models.memberships import Membership
+    from app.models.notifications import Notification
 
 
 class UserRole(StrEnum):
@@ -70,6 +71,9 @@ class User(Base, TimestampMixin):
         cascade=ASYNC_CASCADE,
         passive_deletes=True,
         foreign_keys="AccessLog.member_id",
+    )
+    notifications: Mapped[list[Notification]] = relationship(
+        back_populates="user", cascade=ASYNC_CASCADE, passive_deletes=True
     )
 
 
