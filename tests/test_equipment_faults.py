@@ -48,6 +48,7 @@ from app.modules.facilities.service import (
     UnitNameTakenError,
     normalise_equipment_type,
 )
+from app.modules.memberships.service import MembershipService
 from app.modules.timetable_sessions.schemas import (
     CreateSessionRequest,
     GenerateEquipmentSlotsRequest,
@@ -188,7 +189,15 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
 
     async def book(self, slot_id, user_id):
         async with self.sessions() as session:
-            return await BookingService(session).create(user_id, slot_id)
+            service = BookingService(session, MembershipService(session))
+            try:
+                booking = await service.create(user_id, slot_id)
+                await session.commit()
+                return booking
+            except SessionFullError:
+                # Joining the waitlist is intentionally persisted before the conflict is returned.
+                await session.commit()
+                raise
 
     async def report(self, unit_id, text_="The safety catch is bent"):
         async with self.sessions() as session:
