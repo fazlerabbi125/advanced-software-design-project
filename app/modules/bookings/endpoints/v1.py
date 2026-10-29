@@ -3,20 +3,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 
 from app.core.dependencies import DbSessionDep
+from app.core.exceptions import AppError, http_error
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.bookings.dependencies import BookingServiceDependency
-from app.modules.bookings.eligibility import BookingEligibilityError
 from app.modules.bookings.schemas import (
     BookingResponse,
     CreateBookingRequest,
     SessionWaitlistResponse,
-)
-from app.modules.bookings.service import (
-    BookingNotFoundError,
-    BookingStateError,
-    SessionFullError,
-    SessionNotFoundError,
-    WaitlistEntryNotFoundError,
 )
 from app.modules.notifications.dependencies import (
     NotificationObserverDependency,
@@ -26,10 +19,15 @@ from app.modules.notifications.dependencies import (
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
 
-def eligibility_error(error: BookingEligibilityError) -> HTTPException:
+def eligibility_error(error: AppError) -> HTTPException:
+    details = error.errors
+    if isinstance(details, dict):
+        details = details.get("failures", [])
+    if details:
+        details = [{"code": item.code, "message": item.message} for item in details]
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        detail=[{"code": item.code, "message": item.message} for item in error.failures],
+        detail=(details or []),
     )
 
 
@@ -47,26 +45,25 @@ async def create_booking(
     notifications: NotificationObserverDependency,
     publisher: NotificationPublisherDependency,
 ) -> Any:
+    pending_notifications: list = []
     try:
-        booking = await service.create(current_user.id, payload.timetable_session_id)
-    except SessionNotFoundError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except SessionFullError as error:
-        await session.commit()
-        await publisher.publish_many(notifications.drain())
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except BookingStateError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except BookingEligibilityError as error:
-        await session.rollback()
-        raise eligibility_error(error) from error
+        booking = await service.create(
+            session, pending_notifications, current_user.id, payload.timetable_session_id
+        )
+    except AppError as error:
+        if isinstance(error.errors, dict) and error.errors.get("commit_required"):
+            await session.commit()
+            await publisher.publish_many(pending_notifications)
+        else:
+            await session.rollback()
+        if error.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT:
+            raise eligibility_error(error) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
     await session.commit()
-    await publisher.publish_many(notifications.drain())
+    await publisher.publish_many(pending_notifications)
     return booking
 
 
@@ -76,9 +73,9 @@ async def create_booking(
     description="List your waitlist entries.",
 )
 async def list_my_waitlist_entries(
-    current_user: CurrentUser, service: BookingServiceDependency
+    current_user: CurrentUser, session: DbSessionDep, service: BookingServiceDependency
 ) -> Any:
-    return await service.list_waitlist_for_user(current_user.id)
+    return await service.list_waitlist_for_user(session, current_user.id)
 
 
 @router.post(
@@ -95,32 +92,33 @@ async def accept_waitlist_offer(
     notifications: NotificationObserverDependency,
     publisher: NotificationPublisherDependency,
 ) -> Any:
+    pending_notifications: list = []
     try:
-        booking = await service.accept_offer(current_user.id, entry_id)
-    except WaitlistEntryNotFoundError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except BookingStateError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except BookingEligibilityError as error:
-        if getattr(error, "commit_required", False):
+        booking = await service.accept_offer(
+            session, pending_notifications, current_user.id, entry_id
+        )
+    except AppError as error:
+        if isinstance(error.errors, dict) and error.errors.get("commit_required"):
             await session.commit()
-            await publisher.publish_many(notifications.drain())
+            await publisher.publish_many(pending_notifications)
         else:
             await session.rollback()
-        raise eligibility_error(error) from error
+        if error.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT:
+            raise eligibility_error(error) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
     await session.commit()
-    await publisher.publish_many(notifications.drain())
+    await publisher.publish_many(pending_notifications)
     return booking
 
 
 @router.get("/me", response_model=list[BookingResponse], description="List your bookings.")
-async def list_my_bookings(current_user: CurrentUser, service: BookingServiceDependency) -> Any:
-    return await service.list_for_user(current_user.id)
+async def list_my_bookings(
+    current_user: CurrentUser, session: DbSessionDep, service: BookingServiceDependency
+) -> Any:
+    return await service.list_for_user(session, current_user.id)
 
 
 @router.post(
@@ -133,13 +131,10 @@ async def check_in_to_booking(
     service: BookingServiceDependency,
 ) -> Any:
     try:
-        booking = await service.check_in(current_user.id, booking_id)
-    except BookingNotFoundError as error:
+        booking = await service.check_in(session, current_user.id, booking_id)
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except BookingStateError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
@@ -158,17 +153,15 @@ async def cancel_booking(
     notifications: NotificationObserverDependency,
     publisher: NotificationPublisherDependency,
 ) -> Any:
+    pending_notifications: list = []
     try:
-        booking = await service.cancel(current_user.id, booking_id)
-    except BookingNotFoundError as error:
+        booking = await service.cancel(session, pending_notifications, current_user.id, booking_id)
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except BookingStateError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
     await session.commit()
-    await publisher.publish_many(notifications.drain())
+    await publisher.publish_many(pending_notifications)
     return booking

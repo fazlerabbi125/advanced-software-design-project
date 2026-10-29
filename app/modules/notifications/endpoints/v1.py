@@ -16,10 +16,13 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
     description="Stream unread and live notifications for the signed-in member.",
 )
 async def stream_notifications(
-    request: Request, current_user: CurrentUser, feed: NotificationFeedDependency
+    request: Request,
+    current_user: CurrentUser,
+    session: DbSessionDep,
+    feed: NotificationFeedDependency,
 ) -> StreamingResponse:
     return StreamingResponse(
-        feed.stream(current_user.id, request.is_disconnected),
+        feed.stream(session, current_user.id, request.is_disconnected),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -36,7 +39,7 @@ async def mark_notification_read(
     session: DbSessionDep,
     feed: NotificationFeedDependency,
 ) -> Any:
-    notification = await feed.mark_read(current_user.id, notification_id)
+    notification = await feed.mark_read(session, current_user.id, notification_id)
     if notification is None:
         await session.rollback()
         raise HTTPException(

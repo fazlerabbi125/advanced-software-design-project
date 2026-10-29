@@ -6,7 +6,6 @@ from typing import Annotated
 from fastapi import Depends, Header, HTTPException, status
 
 from app.core.config import get_settings
-from app.core.dependencies import DbSessionDep
 from app.models.access import AccessZone
 from app.modules.access.biometric_service import BiometricAccessService, ScannerDevice
 from app.modules.access.occupancy import ZoneOccupancy, get_zone_occupancy
@@ -34,12 +33,10 @@ AccessPoliciesDependency = Annotated[
 
 
 def get_access_service(
-    session: DbSessionDep,
-    memberships: MembershipServiceDependency,
     occupancy: ZoneOccupancyDependency,
     policies: AccessPoliciesDependency,
 ) -> AccessService:
-    return AccessService(session, memberships, occupancy, policies)
+    return AccessService(occupancy, policies)
 
 
 def get_scanner_device(x_device_key: Annotated[str | None, Header()] = None) -> ScannerDevice:
@@ -58,9 +55,9 @@ AccessServiceDependency = Annotated[AccessService, Depends(get_access_service)]
 
 
 def get_biometric_access_service(
-    session: DbSessionDep, access: AccessServiceDependency
+    access: AccessServiceDependency,
 ) -> BiometricAccessService:
-    return BiometricAccessService(session, access)
+    return BiometricAccessService(access)
 
 
 BiometricAccessServiceDependency = Annotated[

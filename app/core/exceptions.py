@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Mapping
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -11,6 +11,43 @@ from app.shared.helpers import utc_now
 logger = logging.getLogger(__name__)
 
 ValidationErrors = dict[str, dict[str, list[str]]]
+
+
+class AppError(Exception):
+    """An expected application-service failure that can be presented by an API route."""
+
+    def __init__(
+        self,
+        message: str,
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+        errors: object | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.errors = errors
+
+    @property
+    def failures(self) -> object:
+        """Compatibility view for an eligibility failure collection, when present."""
+        if isinstance(self.errors, dict):
+            return self.errors.get("failures", [])
+        return self.errors or []
+
+    @property
+    def commit_required(self) -> bool:
+        return isinstance(self.errors, dict) and bool(self.errors.get("commit_required"))
+
+    @property
+    def position(self) -> int | None:
+        if isinstance(self.errors, dict):
+            position = self.errors.get("position")
+            return position if isinstance(position, int) else None
+        return None
+
+
+def http_error(error: AppError) -> HTTPException:
+    """Convert an expected service error to the HTTP response used by API routes."""
+    return HTTPException(status_code=error.status_code, detail=str(error))
 
 
 def build_error_response(

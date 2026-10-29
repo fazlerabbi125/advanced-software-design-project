@@ -71,14 +71,17 @@ async def stripe_webhook(
         )
         return {"status": "ignored"}
 
+    pending_notifications: list = []
     try:
         outcome = await service.process_checkout(
+            session,
+            pending_notifications,
             stripe_event_id=str(event["id"]),
             stripe_session_id=str(checkout["id"]),
             payment_succeeded=payment_succeeded,
         )
         await session.commit()
-        await publisher.publish_many(notifications.drain())
+        await publisher.publish_many(pending_notifications)
     except Exception:
         await session.rollback()
         raise

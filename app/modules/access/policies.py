@@ -3,7 +3,9 @@ from typing import Protocol
 from uuid import UUID
 
 from redis.exceptions import RedisError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import AppError
 from app.models.access import AccessZone
 from app.models.memberships import MembershipEntitlement
 from app.modules.access.occupancy import EntryOutcome, ZoneOccupancy
@@ -13,25 +15,11 @@ from app.shared.constants import ZONE_STAY_MINUTES
 logger = logging.getLogger(__name__)
 
 
-class AccessDeniedError(ValueError):
-    """Raised when a member is not allowed into a zone."""
-
-
-class ZoneFullError(AccessDeniedError):
-    """Raised when a zone has no free place, after putting the member on its waiting list."""
-
-    def __init__(self, zone: AccessZone, position: int) -> None:
-        self.zone = zone
-        self.position = position
-        room = zone.value.removeprefix("vip_").replace("_", " ")
-        super().__init__(f"the {room} is full, you are number {position} on the waiting list")
-
-
 class AccessPolicy(Protocol):
     """A rule that decides whether a member may enter a zone."""
 
-    async def check(self, member_id: UUID, zone: AccessZone) -> bool:
-        """Admit the member, or raise AccessDeniedError to refuse entry.
+    async def check(self, session: AsyncSession, member_id: UUID, zone: AccessZone) -> bool:
+        """Admit the member, or raise AppError to refuse entry.
 
         Returning normally means the member is let in and counted in the zone. Returns
         True when this call took a new place, so the caller knows to give it back if
@@ -51,11 +39,11 @@ class GymFloorPolicy:
         self.memberships = memberships
         self.occupancy = occupancy
 
-    async def check(self, member_id: UUID, zone: AccessZone) -> bool:
+    async def check(self, session: AsyncSession, member_id: UUID, zone: AccessZone) -> bool:
         if not await self.memberships.has_entitlement(
-            member_id, MembershipEntitlement.GYM_FLOOR_ACCESS
+            session, member_id, MembershipEntitlement.GYM_FLOOR_ACCESS
         ):
-            raise AccessDeniedError("your membership plan does not allow access to this zone")
+            raise AppError("your membership plan does not allow access to this zone", 403)
         try:
             entry = await self.occupancy.enter(zone.value, member_id, stay_seconds(zone))
         except RedisError:
@@ -78,11 +66,11 @@ class VipAreaPolicy:
         self.occupancy = occupancy
         self.capacity = capacity
 
-    async def check(self, member_id: UUID, zone: AccessZone) -> bool:
+    async def check(self, session: AsyncSession, member_id: UUID, zone: AccessZone) -> bool:
         if not await self.memberships.has_entitlement(
-            member_id, MembershipEntitlement.VIP_AREA_ACCESS
+            session, member_id, MembershipEntitlement.VIP_AREA_ACCESS
         ):
-            raise AccessDeniedError("your membership plan does not allow access to this zone")
+            raise AppError("your membership plan does not allow access to this zone", 403)
         try:
             entry = await self.occupancy.enter(
                 zone.value, member_id, stay_seconds(zone), self.capacity
@@ -90,11 +78,16 @@ class VipAreaPolicy:
         except RedisError as error:
             # Without the count we cannot keep to the limit, so the room stays closed.
             logger.exception("Unable to check capacity for zone %s", zone.value)
-            raise AccessDeniedError(
-                "VIP entry is unavailable right now, please ask a member of staff"
+            raise AppError(
+                "VIP entry is unavailable right now, please ask a member of staff", 403
             ) from error
         if entry.outcome == EntryOutcome.WAITLISTED:
-            raise ZoneFullError(zone, entry.waitlist_position or 1)
+            room = zone.value.removeprefix("vip_").replace("_", " ")
+            raise AppError(
+                f"the {room} is full, you are number "
+                f"{entry.waitlist_position or 1} on the waiting list",
+                409,
+            )
         return entry.outcome == EntryOutcome.ADMITTED
 
 

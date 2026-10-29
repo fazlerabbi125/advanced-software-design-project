@@ -10,21 +10,24 @@ from app.modules.notifications.service import NotificationEvent, NotificationObs
 
 
 class StripeWebhookService:
-    def __init__(
-        self, session: AsyncSession, notifications: NotificationObserver | None = None
-    ) -> None:
-        self.session = session
+    def __init__(self, notifications: NotificationObserver | None = None) -> None:
         self.notifications = notifications
 
     async def process_checkout(
-        self, *, stripe_event_id: str, stripe_session_id: str, payment_succeeded: bool
+        self,
+        session: AsyncSession,
+        pending_notifications: list,
+        *,
+        stripe_event_id: str,
+        stripe_session_id: str,
+        payment_succeeded: bool,
     ) -> str:
         """Apply one verified Checkout outcome to its pending membership.
 
         The caller commits the unique Stripe event ID and membership update together.
         ``ON CONFLICT DO NOTHING`` makes concurrent Stripe retries harmless.
         """
-        membership = await self.session.scalar(
+        membership = await session.scalar(
             select(Membership)
             .where(Membership.stripe_session_id == stripe_session_id)
             .with_for_update()
@@ -34,7 +37,7 @@ class StripeWebhookService:
         if membership.status != MembershipStatus.PENDING:
             return "ignored"
 
-        inserted_event_id = await self.session.scalar(
+        inserted_event_id = await session.scalar(
             insert(StripeEvent)
             .values(stripe_event_id=stripe_event_id, membership_id=membership.id)
             .on_conflict_do_nothing(index_elements=[StripeEvent.stripe_event_id])
@@ -48,6 +51,8 @@ class StripeWebhookService:
         )
         if payment_succeeded and self.notifications is not None:
             await self.notifications.observe(
+                session,
+                pending_notifications,
                 NotificationEvent(
                     user_id=membership.user_id,
                     event_type=NotificationType.MEMBERSHIP_PAYMENT_CONFIRMED,
@@ -57,6 +62,6 @@ class StripeWebhookService:
                         "starts_on": membership.starts_on.isoformat(),
                         "ends_on": membership.ends_on.isoformat(),
                     },
-                )
+                ),
             )
         return "activated" if payment_succeeded else "cancelled"

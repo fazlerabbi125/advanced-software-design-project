@@ -3,15 +3,14 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.dependencies import DbSessionDep
+from app.core.exceptions import AppError, http_error
 from app.models.access import AccessEvent, AccessZone
 from app.models.auth import User, UserRole
-from app.modules.access.biometric_service import BiometricScanDeniedError
 from app.modules.access.dependencies import (
     AccessServiceDependency,
     BiometricAccessServiceDependency,
     ScannerDeviceDependency,
 )
-from app.modules.access.policies import ZoneFullError
 from app.modules.access.schemas import (
     AccessLogResponse,
     CheckInRequest,
@@ -43,14 +42,11 @@ async def check_in(
         )
     result = None
     try:
-        result = await service.check_in(member_id, payload.zone)
+        result = await service.check_in(session, member_id, payload.zone)
         await session.commit()
-    except ZoneFullError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except ValueError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         if result is not None and result.took_new_place:
@@ -74,6 +70,7 @@ async def manual_check_in(
     result = None
     try:
         result = await service.check_in(
+            session,
             payload.member_id,
             payload.zone,
             source="manual",
@@ -82,12 +79,9 @@ async def manual_check_in(
             reason=payload.reason,
         )
         await session.commit()
-    except ZoneFullError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except ValueError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         if result is not None and result.took_new_place:
@@ -114,7 +108,7 @@ async def check_out(
             status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
         )
     try:
-        access_log = await service.check_out(member_id, payload.zone)
+        access_log = await service.check_out(session, member_id, payload.zone)
         await session.commit()
     except Exception:
         await session.rollback()
@@ -145,21 +139,15 @@ async def device_check_in(
 ) -> Any:
     result = None
     try:
-        result = await service.check_in(payload, scanner)
+        result = await service.check_in(session, payload, scanner)
         await session.commit()
-    except BiometricScanDeniedError as error:
+    except AppError as error:
         try:
             await session.commit()
         except Exception:
             await session.rollback()
             raise
-        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
-    except ZoneFullError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except ValueError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         if result is not None and result.took_new_place:

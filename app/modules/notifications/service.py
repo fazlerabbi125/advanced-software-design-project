@@ -28,24 +28,18 @@ class NotificationEvent:
 class NotificationObserver:
     """Records domain events as durable notification rows in the current transaction."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
-        self._pending: list[Notification] = []
-
-    async def observe(self, event: NotificationEvent) -> Notification:
+    async def observe(
+        self, session: AsyncSession, pending: list[Notification], event: NotificationEvent
+    ) -> Notification:
         notification = Notification(
             user_id=event.user_id,
             event_type=event.event_type,
             payload=event.payload,
         )
-        self.session.add(notification)
-        await self.session.flush()
-        self._pending.append(notification)
+        session.add(notification)
+        await session.flush()
+        pending.append(notification)
         return notification
-
-    def drain(self) -> list[Notification]:
-        pending, self._pending = self._pending, []
-        return pending
 
 
 class NotificationPublisher:
@@ -80,20 +74,21 @@ class NotificationPublisher:
 
 
 class NotificationFeed:
-    def __init__(self, session: AsyncSession, redis: Redis) -> None:
-        self.session = session
+    def __init__(self, redis: Redis) -> None:
         self.redis = redis
 
-    async def unread_for_user(self, user_id: UUID) -> list[Notification]:
+    async def unread_for_user(self, session: AsyncSession, user_id: UUID) -> list[Notification]:
         statement = (
             select(Notification)
             .where(Notification.user_id == user_id, Notification.is_read.is_(False))
             .order_by(Notification.created_at, Notification.id)
         )
-        return list((await self.session.scalars(statement)).all())
+        return list((await session.scalars(statement)).all())
 
-    async def mark_read(self, user_id: UUID, notification_id: int) -> Notification | None:
-        notification = await self.session.scalar(
+    async def mark_read(
+        self, session: AsyncSession, user_id: UUID, notification_id: int
+    ) -> Notification | None:
+        notification = await session.scalar(
             select(Notification).where(
                 Notification.id == notification_id, Notification.user_id == user_id
             )
@@ -105,11 +100,13 @@ class NotificationFeed:
             notification.read_at = datetime.now(UTC)
         return notification
 
-    async def stream(self, user_id: UUID, is_disconnected: Any) -> AsyncIterator[str]:
+    async def stream(
+        self, session: AsyncSession, user_id: UUID, is_disconnected: Any
+    ) -> AsyncIterator[str]:
         pubsub = self.redis.pubsub()
         await pubsub.subscribe(NotificationPublisher.channel(user_id))
         try:
-            for notification in await self.unread_for_user(user_id):
+            for notification in await self.unread_for_user(session, user_id):
                 yield self._sse(NotificationPublisher.payload(notification), notification.id)
             while not await is_disconnected():
                 try:

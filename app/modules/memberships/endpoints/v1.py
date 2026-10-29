@@ -1,8 +1,9 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from app.core.dependencies import DbSessionDep
+from app.core.exceptions import AppError, http_error
 from app.models.auth import UserRole
 from app.modules.auth.dependencies import CurrentUser, require_roles
 from app.modules.memberships.dependencies import MembershipServiceDependency
@@ -14,15 +15,6 @@ from app.modules.memberships.schemas import (
     PurchaseResponse,
     UpdatePlanRequest,
 )
-from app.modules.memberships.service import (
-    ActiveMembershipExistsError,
-    MembershipNotFoundError,
-    PaymentDeclinedError,
-    PendingMembershipExistsError,
-    PlanNameTakenError,
-    PlanNotFoundError,
-)
-from app.modules.memberships.states import MembershipActionError
 from app.modules.notifications.dependencies import (
     NotificationObserverDependency,
     NotificationPublisherDependency,
@@ -34,18 +26,19 @@ router = APIRouter(prefix="/memberships", tags=["memberships"])
 @router.get(
     "/plans", response_model=list[PlanResponse], description="List plans currently on sale."
 )
-async def list_plans(service: MembershipServiceDependency) -> Any:
-    return await service.list_plans()
+async def list_plans(session: DbSessionDep, service: MembershipServiceDependency) -> Any:
+    return await service.list_plans(session)
 
 
 @router.get(
     "/plans/all", response_model=list[PlanResponse], description="List all plans for managers."
 )
 async def list_all_plans(
+    session: DbSessionDep,
     service: MembershipServiceDependency,
     _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
 ) -> Any:
-    return await service.list_all_plans()
+    return await service.list_all_plans(session)
 
 
 @router.post(
@@ -61,11 +54,11 @@ async def create_plan(
     _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
 ) -> Any:
     try:
-        plan = await service.create_plan(**payload.model_dump())
+        plan = await service.create_plan(session, **payload.model_dump())
         await session.commit()
-    except PlanNameTakenError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
@@ -85,13 +78,10 @@ async def update_plan(
     changes = payload.model_dump(exclude_none=True)
     entitlements = changes.pop("entitlements", None)
     try:
-        plan = await service.update_plan(plan_id, entitlements=entitlements, **changes)
-    except PlanNotFoundError as error:
+        plan = await service.update_plan(session, plan_id, entitlements=entitlements, **changes)
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except PlanNameTakenError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
@@ -109,11 +99,11 @@ async def deactivate_plan(
     _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
 ) -> None:
     try:
-        await service.deactivate_plan(plan_id)
+        await service.deactivate_plan(session, plan_id)
         await session.commit()
-    except PlanNotFoundError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
@@ -132,18 +122,10 @@ async def purchase_membership(
     service: MembershipServiceDependency,
 ) -> Any:
     try:
-        result = await service.purchase(current_user.id, payload.plan_id)
-    except PlanNotFoundError as error:
+        result = await service.purchase(session, current_user.id, payload.plan_id)
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except (ActiveMembershipExistsError, PendingMembershipExistsError) as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except PaymentDeclinedError as error:
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(error)
-        ) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
@@ -153,9 +135,9 @@ async def purchase_membership(
 
 @router.get("/me", response_model=list[MembershipResponse], description="List your memberships.")
 async def list_my_memberships(
-    current_user: CurrentUser, service: MembershipServiceDependency
+    current_user: CurrentUser, session: DbSessionDep, service: MembershipServiceDependency
 ) -> Any:
-    return await service.list_for_user(current_user.id)
+    return await service.list_for_user(session, current_user.id)
 
 
 @router.post(
@@ -169,18 +151,16 @@ async def cancel_my_membership(
     publisher: NotificationPublisherDependency,
 ) -> Any:
     try:
-        membership = await service.cancel(current_user.id)
-    except MembershipNotFoundError as error:
+        pending_notifications: list = []
+        membership = await service.cancel(session, pending_notifications, current_user.id)
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except MembershipActionError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
     await session.commit()
-    await publisher.publish_many(notifications.drain())
+    await publisher.publish_many(pending_notifications)
     return membership
 
 
@@ -197,24 +177,14 @@ async def renew_my_membership(
     publisher: NotificationPublisherDependency,
 ) -> Any:
     try:
-        result = await service.renew(current_user.id)
-    except (MembershipNotFoundError, PlanNotFoundError) as error:
+        pending_notifications: list = []
+        result = await service.renew(session, pending_notifications, current_user.id)
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except MembershipActionError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except PendingMembershipExistsError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except PaymentDeclinedError as error:
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(error)
-        ) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
     await session.commit()
-    await publisher.publish_many(notifications.drain())
+    await publisher.publish_many(pending_notifications)
     return result

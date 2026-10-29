@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.core.exceptions import AppError
 from app.models import (
     Base,
     Booking,
@@ -30,30 +31,16 @@ from app.models import (
     WaitlistEntry,
     WaitlistStatus,
 )
-from app.modules.bookings.eligibility import (
-    BookingContext,
-    BookingEligibilityError,
-    build_eligibility_chain,
-)
+from app.modules.bookings.eligibility import BookingContext, build_eligibility_chain
 from app.modules.bookings.outages import UnitOutageHandler
-from app.modules.bookings.service import (
-    BookingService,
-    BookingStateError,
-    SessionFullError,
-    offer_deadline,
-)
-from app.modules.facilities.service import (
-    FacilitiesService,
-    FaultStateError,
-    UnitNameTakenError,
-    normalise_equipment_type,
-)
+from app.modules.bookings.service import BookingService, offer_deadline
+from app.modules.facilities.service import FacilitiesService, normalise_equipment_type
 from app.modules.memberships.service import MembershipService
 from app.modules.timetable_sessions.schemas import (
     CreateSessionRequest,
     GenerateEquipmentSlotsRequest,
 )
-from app.modules.timetable_sessions.service import EquipmentUnavailableError, TimetableService
+from app.modules.timetable_sessions.service import TimetableService
 from tests.test_booking_eligibility import NOW, membership
 
 EQUIPMENT = BookingResourceType.EQUIPMENT
@@ -156,7 +143,9 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
 
     async def add_unit(self, name, equipment_type="Squat rack"):
         async with self.sessions() as session:
-            unit = await FacilitiesService(session).register_unit(name, equipment_type, "gym_floor")
+            unit = await FacilitiesService().register_unit(
+                session, name, equipment_type, "gym_floor"
+            )
             return unit.id
 
     async def add_member(self, name):
@@ -174,7 +163,8 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
 
     async def add_slot(self, unit_id, starts_at=NOW + HOUR, minutes=60):
         async with self.sessions() as session:
-            slot = await TimetableService(session).create(
+            slot = await TimetableService().create(
+                session,
                 CreateSessionRequest(
                     resource_name="ignored",
                     resource_type=EQUIPMENT,
@@ -182,35 +172,38 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
                     ends_at=starts_at + timedelta(minutes=minutes),
                     capacity=1,
                     equipment_unit_id=unit_id,
-                )
+                ),
             )
             await session.commit()
             return slot.id
 
     async def book(self, slot_id, user_id):
         async with self.sessions() as session:
-            service = BookingService(session, MembershipService(session))
+            service = BookingService(MembershipService())
             try:
-                booking = await service.create(user_id, slot_id)
+                booking = await service.create(session, [], user_id, slot_id)
                 await session.commit()
                 return booking
-            except SessionFullError:
+            except AppError as error:
+                if not error.commit_required:
+                    raise
                 # Joining the waitlist is intentionally persisted before the conflict is returned.
                 await session.commit()
                 raise
 
     async def report(self, unit_id, text_="The safety catch is bent"):
         async with self.sessions() as session:
-            fault = await FacilitiesService(session).report_fault(unit_id, self.staff_id, text_)
+            fault = await FacilitiesService().report_fault(session, unit_id, self.staff_id, text_)
+            await session.commit()
             return fault.id
 
     async def confirm(self, fault_id, now=NOW):
         """What the confirm endpoint does: one transaction for the fault and the slots."""
         async with self.sessions() as session:
-            facilities = FacilitiesService(session)
-            fault, unit = await facilities.confirm_fault(fault_id, self.staff_id, now)
-            outcome = await UnitOutageHandler(session).handle(unit, now)
-            await facilities.save(fault)
+            facilities = FacilitiesService()
+            fault, unit = await facilities.confirm_fault(session, fault_id, self.staff_id, now)
+            outcome = await UnitOutageHandler().handle(session, unit, now)
+            await session.commit()
             return outcome
 
     async def get(self, model, row_id):
@@ -246,7 +239,7 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
         await self.book(await self.add_slot(self.rack2), ben)
         slot_id = await self.add_slot(self.rack1)
         booking = await self.book(slot_id, ann)
-        with self.assertRaises(SessionFullError):
+        with self.assertRaises(AppError):
             await self.book(slot_id, cat)
 
         fault_id = await self.report(self.rack1)
@@ -261,11 +254,12 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             entry = await session.scalar(select(WaitlistEntry).where(WaitlistEntry.user_id == cat))
             self.assertEqual(entry.status, WaitlistStatus.EXPIRED)
-        with self.assertRaisesRegex(BookingStateError, "out of service"):
+        with self.assertRaisesRegex(AppError, "out of service"):
             await self.book(slot_id, ann)
 
         async with self.sessions() as session:
-            fault = await FacilitiesService(session).resolve_fault(fault_id, self.staff_id)
+            fault = await FacilitiesService().resolve_fault(session, fault_id, self.staff_id)
+            await session.commit()
         self.assertEqual(fault.status, FaultStatus.RESOLVED)
         rebooked = await self.book(slot_id, ann)
         self.assertEqual(rebooked.status, BookingStatus.CONFIRMED)
@@ -282,22 +276,25 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
         first, second = await self.report(self.rack1), await self.report(self.rack1)
         await self.confirm(first)
         await self.confirm(second)
-        with self.assertRaises(FaultStateError):
+        with self.assertRaises(AppError):
             await self.confirm(first)
         async with self.sessions() as session:
-            service = FacilitiesService(session)
-            await service.resolve_fault(first, self.staff_id)
+            service = FacilitiesService()
+            await service.resolve_fault(session, first, self.staff_id)
             # Still out of service: the second confirmed fault is open.
-            self.assertFalse((await service.get_unit(self.rack1)).in_service)
-            await service.resolve_fault(second, self.staff_id)
-            self.assertTrue((await service.get_unit(self.rack1)).in_service)
-            dismissed = await service.dismiss_fault(await self.report(self.bike), self.staff_id)
+            self.assertFalse((await service.get_unit(session, self.rack1)).in_service)
+            await service.resolve_fault(session, second, self.staff_id)
+            self.assertTrue((await service.get_unit(session, self.rack1)).in_service)
+            dismissed = await service.dismiss_fault(
+                session, await self.report(self.bike), self.staff_id
+            )
             self.assertEqual(dismissed.status, FaultStatus.DISMISSED)
-            with self.assertRaises(FaultStateError):
-                await service.resolve_fault(dismissed.id, self.staff_id)
+            with self.assertRaises(AppError):
+                await service.resolve_fault(session, dismissed.id, self.staff_id)
             reported = await self.report(self.bike)
             self.assertEqual(
-                [item.id for item in await service.list_faults(FaultStatus.REPORTED)], [reported]
+                [item.id for item in await service.list_faults(session, FaultStatus.REPORTED)],
+                [reported],
             )
 
     async def test_same_unit_name_registered_twice_at_once_is_a_clean_conflict(self):
@@ -307,7 +304,7 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
             return_exceptions=True,
         )
         self.assertEqual(sum(isinstance(item, int) for item in results), 1)
-        self.assertEqual(sum(isinstance(item, UnitNameTakenError) for item in results), 1)
+        self.assertEqual(sum(isinstance(item, AppError) for item in results), 1)
 
     async def test_two_faults_confirmed_at_once_cannot_share_the_last_free_unit(self):
         rack3 = await self.add_unit("Squat Rack 3")
@@ -333,7 +330,7 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
         for hours in (1, 3):
             await self.book(await self.add_slot(self.rack1, NOW + hours * HOUR), ann)
         third = await self.add_slot(self.rack2, NOW + 5 * HOUR)
-        with self.assertRaises(BookingEligibilityError) as raised:
+        with self.assertRaises(AppError) as raised:
             await self.book(third, ann)
         self.assertEqual([item.code for item in raised.exception.failures], ["equipment_daily_cap"])
         # Another equipment type, or the next day, is fine.
@@ -342,16 +339,17 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_equipment_slots_on_the_timetable(self):
         await self.add_slot(self.rack1, NOW + HOUR)
-        with self.assertRaisesRegex(EquipmentUnavailableError, "already has a slot"):
+        with self.assertRaisesRegex(AppError, "already has a slot"):
             await self.add_slot(self.rack1, NOW + timedelta(minutes=90))
         async with self.sessions() as session:
-            slots = await TimetableService(session).generate_equipment_slots(
+            slots = await TimetableService().generate_equipment_slots(
+                session,
                 GenerateEquipmentSlotsRequest(
                     equipment_unit_id=self.rack1,
                     starts_at=NOW,
                     ends_at=NOW + 3 * HOUR,
                     slot_minutes=30,
-                )
+                ),
             )
             await session.commit()
         # 12:00-15:00 in 30-minute slots, skipping the existing 13:00-14:00 slot.
@@ -361,7 +359,7 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(all(slot.resource_name == "Squat Rack 1" for slot in slots))
         await self.confirm(await self.report(self.bike))
-        with self.assertRaisesRegex(EquipmentUnavailableError, "out of service"):
+        with self.assertRaisesRegex(AppError, "out of service"):
             await self.add_slot(self.bike, NOW + HOUR)
 
 

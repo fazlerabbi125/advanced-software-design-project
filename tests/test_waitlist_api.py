@@ -1,15 +1,15 @@
 import os
 import unittest
 from datetime import timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.core.exceptions import AppError
 from app.models import Booking, BookingStatus, User, WaitlistEntry, WaitlistStatus
-from app.modules.bookings.eligibility import BookingEligibilityError, EligibilityFailure
-from app.modules.bookings.service import BookingStateError, WaitlistEntryNotFoundError
+from app.modules.bookings.eligibility import EligibilityFailure
 from tests.test_booking_eligibility import NOW
 from tests.test_booking_jobs import timetable_session
 
@@ -34,8 +34,8 @@ class WaitlistApiTests(unittest.TestCase):
         # Import the router with test-only settings; overridden dependencies never connect.
         with patch.dict(os.environ, SETTINGS):
             from app.modules.auth.dependencies import get_current_user
-            from app.modules.bookings.endpoints.v1 import router
             from app.modules.bookings.dependencies import get_booking_service
+            from app.modules.bookings.endpoints.v1 import router
         self.service = AsyncMock()
         app = FastAPI()
         app.include_router(router)
@@ -60,13 +60,15 @@ class WaitlistApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["status"], "confirmed")
-        self.service.accept_offer.assert_awaited_once_with(self.current_user_id, 5)
+        self.service.accept_offer.assert_awaited_once_with(ANY, ANY, self.current_user_id, 5)
 
     def test_accept_errors(self):
-        failure = BookingEligibilityError([EligibilityFailure("weekly_limit", "limit reached")])
+        failure = AppError(
+            "booking eligibility failed", 422, [EligibilityFailure("weekly_limit", "limit reached")]
+        )
         cases = (
-            (WaitlistEntryNotFoundError("missing"), 404),
-            (BookingStateError("no open offer"), 409),
+            (AppError("missing", 404), 404),
+            (AppError("no open offer", 409), 409),
             (failure, 422),
         )
         for error, expected in cases:

@@ -13,6 +13,7 @@ from uuid import uuid4
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.core.exceptions import AppError
 from app.models import (
     Base,
     BookingResourceType,
@@ -23,13 +24,8 @@ from app.models import (
     TimetableSession,
     User,
 )
-from app.modules.bookings.eligibility import BookingEligibilityError
 from app.modules.bookings.service import BookingService
-from app.modules.memberships.service import (
-    MembershipService,
-    PlanNameTakenError,
-    PlanNotFoundError,
-)
+from app.modules.memberships.service import MembershipService
 from tests.test_booking_eligibility import NOW
 
 CLASS = MembershipEntitlement.CLASS_BOOKING
@@ -63,7 +59,8 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def create(self, name, price_minor=2500, window=1, limit=1, entitlements=(CLASS,)):
         async with self.sessions() as session:
-            plan = await MembershipService(session).create_plan(
+            plan = await MembershipService().create_plan(
+                session,
                 name=name,
                 price_minor=price_minor,
                 currency="EUR",
@@ -89,17 +86,17 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((plan.booking_window_days, plan.weekly_booking_limit), (2, 4))
         self.assertEqual(await self.entitlements_of(plan.id), {GYM, CLASS})
         async with self.sessions() as session:
-            names = [item.name for item in await MembershipService(session).list_plans()]
+            names = [item.name for item in await MembershipService().list_plans(session)]
         self.assertIn("Student", names)
 
     async def test_plan_names_are_unique_ignoring_case(self):
-        with self.assertRaises(PlanNameTakenError):
+        with self.assertRaises(AppError):
             await self.create("standard")
 
     async def test_update_changes_only_given_fields_and_replaces_entitlements(self):
         async with self.sessions() as session:
-            plan = await MembershipService(session).update_plan(
-                self.standard.id, weekly_booking_limit=6, entitlements={GYM, POOL}
+            plan = await MembershipService().update_plan(
+                session, self.standard.id, weekly_booking_limit=6, entitlements={GYM, POOL}
             )
             await session.commit()
 
@@ -111,30 +108,30 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_rename_checks_other_plans_but_allows_a_case_change(self):
         await self.create("Student")
         async with self.sessions() as session:
-            service = MembershipService(session)
-            with self.assertRaises(PlanNameTakenError):
-                await service.update_plan(self.standard.id, name="STUDENT")
-            plan = await service.update_plan(self.standard.id, name="STANDARD")
+            service = MembershipService()
+            with self.assertRaises(AppError):
+                await service.update_plan(session, self.standard.id, name="STUDENT")
+            plan = await service.update_plan(session, self.standard.id, name="STANDARD")
             await session.commit()
         self.assertEqual(plan.name, "STANDARD")
 
     async def test_unknown_plan_and_unknown_fields_are_refused(self):
         async with self.sessions() as session:
-            service = MembershipService(session)
-            with self.assertRaises(PlanNotFoundError):
-                await service.update_plan(99999, weekly_booking_limit=1)
-            with self.assertRaises(ValueError):
-                await service.update_plan(self.standard.id, id=5)
-            with self.assertRaises(PlanNotFoundError):
-                await service.deactivate_plan(99999)
+            service = MembershipService()
+            with self.assertRaises(AppError):
+                await service.update_plan(session, 99999, weekly_booking_limit=1)
+            with self.assertRaises(AppError):
+                await service.update_plan(session, self.standard.id, id=5)
+            with self.assertRaises(AppError):
+                await service.deactivate_plan(session, 99999)
 
     async def test_deactivated_plan_is_off_sale_but_listed_for_managers(self):
         async with self.sessions() as session:
-            service = MembershipService(session)
-            await service.deactivate_plan(self.standard.id)
+            service = MembershipService()
+            await service.deactivate_plan(session, self.standard.id)
             await session.commit()
-            on_sale = [plan.id for plan in await service.list_plans()]
-            everything = {plan.id: plan.is_active for plan in await service.list_all_plans()}
+            on_sale = [plan.id for plan in await service.list_plans(session)]
+            everything = {plan.id: plan.is_active for plan in await service.list_all_plans(session)}
         self.assertNotIn(self.standard.id, on_sale)
         self.assertEqual(everything[self.standard.id], False)
 
@@ -168,15 +165,15 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
                 )
                 session.add(timetable_session)
                 await session.commit()
-                booking = await BookingService(session, MembershipService(session)).create(
-                    user_id, timetable_session.id
+                booking = await BookingService(MembershipService()).create(
+                    session, [], user_id, timetable_session.id
                 )
                 await session.commit()
                 return booking
 
         with patch("app.modules.bookings.service.utc_now", return_value=NOW):
             await book(BookingResourceType.CLASS, days_ahead=0, minutes=60)
-            with self.assertRaises(BookingEligibilityError) as raised:
+            with self.assertRaises(AppError) as raised:
                 await book(BookingResourceType.POOL, days_ahead=2)
         self.assertEqual(
             {item.code for item in raised.exception.failures},

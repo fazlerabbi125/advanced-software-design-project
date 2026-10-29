@@ -1,8 +1,9 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, UploadFile, status
 
 from app.core.dependencies import DbSessionDep
+from app.core.exceptions import AppError, http_error
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.members.dependencies import MemberServiceDependency
 from app.modules.members.schemas import BiometricImageResponse
@@ -24,15 +25,14 @@ async def upload_biometric_image(
 ) -> Any:
     try:
         profile = await service.upload_biometric_image(
+            session,
             current_user.id,
             image,
         )
         await session.commit()
-    except ValueError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)
-        ) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise

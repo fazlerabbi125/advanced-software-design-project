@@ -1,7 +1,7 @@
 import os
 import unittest
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 from uuid import uuid4
 
 from fastapi import FastAPI
@@ -17,8 +17,8 @@ class ManualCheckInApiTests(unittest.TestCase):
     def setUp(self):
         # Import the router with test-only settings; overridden dependencies never connect.
         with patch.dict(os.environ, TEST_ENVIRONMENT):
-            from app.modules.access.endpoints.v1 import router
             from app.modules.access.dependencies import get_access_service
+            from app.modules.access.endpoints.v1 import router
             from app.modules.auth.dependencies import get_current_user
         self.service = AsyncMock()
         self.member_id = uuid4()
@@ -56,6 +56,7 @@ class ManualCheckInApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.service.check_in.assert_awaited_once_with(
+            ANY,
             self.member_id,
             AccessZone.VIP_SAUNA,
             source="manual",
