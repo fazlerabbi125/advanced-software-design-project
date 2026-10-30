@@ -5,16 +5,17 @@ from fastapi import APIRouter, HTTPException, status
 from app.core.dependencies import DbSessionDep
 from app.core.exceptions import AppError, http_error
 from app.modules.auth.dependencies import CurrentUser
-from app.modules.bookings.dependencies import BookingServiceDependency
+from app.modules.bookings.dependencies import BookingServiceDep
 from app.modules.bookings.schemas import (
     BookingResponse,
     CreateBookingRequest,
     SessionWaitlistResponse,
 )
 from app.modules.notifications.dependencies import (
-    NotificationObserverDependency,
-    NotificationPublisherDependency,
+    NotificationObserverDep,
+    NotificationPublisherDep,
 )
+from app.shared.pagination import CursorParamsDep, CursorResponse
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
@@ -41,9 +42,9 @@ async def create_booking(
     payload: CreateBookingRequest,
     current_user: CurrentUser,
     session: DbSessionDep,
-    service: BookingServiceDependency,
-    notifications: NotificationObserverDependency,
-    publisher: NotificationPublisherDependency,
+    service: BookingServiceDep,
+    notifications: NotificationObserverDep,
+    publisher: NotificationPublisherDep,
 ) -> Any:
     pending_notifications: list = []
     try:
@@ -69,13 +70,17 @@ async def create_booking(
 
 @router.get(
     "/waitlist/me",
-    response_model=list[SessionWaitlistResponse],
+    response_model=CursorResponse[SessionWaitlistResponse],
     description="List your waitlist entries.",
 )
 async def list_my_waitlist_entries(
-    current_user: CurrentUser, session: DbSessionDep, service: BookingServiceDependency
+    current_user: CurrentUser,
+    session: DbSessionDep,
+    service: BookingServiceDep,
+    params: CursorParamsDep,
 ) -> Any:
-    return await service.list_waitlist_for_user(session, current_user.id)
+    result = await service.list_waitlist_for_user(session, current_user.id, params)
+    return {"items": result.items, "meta": result.meta}
 
 
 @router.post(
@@ -88,9 +93,9 @@ async def accept_waitlist_offer(
     entry_id: int,
     current_user: CurrentUser,
     session: DbSessionDep,
-    service: BookingServiceDependency,
-    notifications: NotificationObserverDependency,
-    publisher: NotificationPublisherDependency,
+    service: BookingServiceDep,
+    notifications: NotificationObserverDep,
+    publisher: NotificationPublisherDep,
 ) -> Any:
     pending_notifications: list = []
     try:
@@ -114,11 +119,17 @@ async def accept_waitlist_offer(
     return booking
 
 
-@router.get("/me", response_model=list[BookingResponse], description="List your bookings.")
+@router.get(
+    "/me", response_model=CursorResponse[BookingResponse], description="List your bookings."
+)
 async def list_my_bookings(
-    current_user: CurrentUser, session: DbSessionDep, service: BookingServiceDependency
+    current_user: CurrentUser,
+    session: DbSessionDep,
+    service: BookingServiceDep,
+    params: CursorParamsDep,
 ) -> Any:
-    return await service.list_for_user(session, current_user.id)
+    result = await service.list_for_user(session, current_user.id, params)
+    return {"items": result.items, "meta": result.meta}
 
 
 @router.post(
@@ -128,7 +139,7 @@ async def check_in_to_booking(
     booking_id: int,
     current_user: CurrentUser,
     session: DbSessionDep,
-    service: BookingServiceDependency,
+    service: BookingServiceDep,
 ) -> Any:
     try:
         booking = await service.check_in(session, current_user.id, booking_id)
@@ -149,9 +160,9 @@ async def cancel_booking(
     booking_id: int,
     current_user: CurrentUser,
     session: DbSessionDep,
-    service: BookingServiceDependency,
-    notifications: NotificationObserverDependency,
-    publisher: NotificationPublisherDependency,
+    service: BookingServiceDep,
+    notifications: NotificationObserverDep,
+    publisher: NotificationPublisherDep,
 ) -> Any:
     pending_notifications: list = []
     try:

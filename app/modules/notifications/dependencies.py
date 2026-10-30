@@ -22,8 +22,6 @@ def get_notification_feed(redis: RedisClientDep) -> NotificationFeed:
     return NotificationFeed(redis)
 
 
-NotificationObserverDependency = Annotated[NotificationObserver, Depends(get_notification_observer)]
-NotificationPublisherDependency = Annotated[
-    NotificationPublisher, Depends(get_notification_publisher)
-]
-NotificationFeedDependency = Annotated[NotificationFeed, Depends(get_notification_feed)]
+NotificationObserverDep = Annotated[NotificationObserver, Depends(get_notification_observer)]
+NotificationPublisherDep = Annotated[NotificationPublisher, Depends(get_notification_publisher)]
+NotificationFeedDep = Annotated[NotificationFeed, Depends(get_notification_feed)]

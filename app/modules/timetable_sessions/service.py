@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
@@ -11,7 +12,15 @@ from app.modules.timetable_sessions.schemas import (
     CreateSessionRequest,
     GenerateEquipmentSlotsRequest,
 )
+from app.shared.constants import EQUIPMENT_SLOT_CAPACITY
 from app.shared.helpers import utc_now
+from app.shared.pagination import (
+    CursorDirection,
+    CursorMeta,
+    CursorParams,
+    CursorResult,
+    encode_cursor,
+)
 
 
 class TimetableService:
@@ -25,7 +34,9 @@ class TimetableService:
             unit = await self._locked_unit_in_service(session, payload.equipment_unit_id)
             resource_name = unit.name
             if await self._unit_has_slot(session, unit.id, starts_at, ends_at):
-                raise AppError(f"{resource_name} already has a slot at that time", 409)
+                raise AppError(
+                    f"{resource_name} already has a slot at that time", HTTPStatus.CONFLICT
+                )
         timetable_session = TimetableSession(
             resource_name=resource_name,
             resource_type=payload.resource_type,
@@ -55,7 +66,7 @@ class TimetableService:
                     resource_type=BookingResourceType.EQUIPMENT,
                     starts_at=starts_at,
                     ends_at=starts_at + length,
-                    capacity=1,
+                    capacity=EQUIPMENT_SLOT_CAPACITY,
                     allocated_count=0,
                     equipment_unit_id=unit.id,
                 )
@@ -70,9 +81,9 @@ class TimetableService:
             select(EquipmentUnit).where(EquipmentUnit.id == unit_id).with_for_update()
         )
         if unit is None:
-            raise AppError("equipment unit was not found", 404)
+            raise AppError("equipment unit was not found", HTTPStatus.NOT_FOUND)
         if not unit.in_service:
-            raise AppError(f"{unit.name} is out of service", 409)
+            raise AppError(f"{unit.name} is out of service", HTTPStatus.CONFLICT)
         return unit
 
     async def _unit_has_slot(
@@ -88,12 +99,75 @@ class TimetableService:
         return clash is not None
 
     async def upcoming(
-        self, session: AsyncSession, after: datetime | None = None
-    ) -> list[TimetableSession]:
+        self, session: AsyncSession, params: CursorParams, after: datetime | None = None
+    ) -> CursorResult[TimetableSession]:
         """Sessions that have not ended yet, soonest first."""
         statement = (
             select(TimetableSession)
+            .outerjoin(EquipmentUnit, TimetableSession.equipment_unit_id == EquipmentUnit.id)
             .where(TimetableSession.ends_at > (after or utc_now()))
-            .order_by(TimetableSession.starts_at, TimetableSession.id)
+            .where(
+                or_(
+                    TimetableSession.equipment_unit_id.is_(None), EquipmentUnit.in_service.is_(True)
+                )
+            )
         )
-        return list((await session.scalars(statement)).all())
+        if params.values:
+            if len(params.values) != 2 or not isinstance(params.values[0], str):
+                raise AppError("cursor is invalid", HTTPStatus.UNPROCESSABLE_ENTITY)
+            try:
+                starts_at = datetime.fromisoformat(params.values[0])
+                session_id = int(params.values[1])
+            except (TypeError, ValueError) as error:
+                raise AppError("cursor is invalid", HTTPStatus.UNPROCESSABLE_ENTITY) from error
+            if params.direction == CursorDirection.NEXT:
+                statement = statement.where(
+                    (TimetableSession.starts_at > starts_at)
+                    | (
+                        (TimetableSession.starts_at == starts_at)
+                        & (TimetableSession.id > session_id)
+                    )
+                ).order_by(TimetableSession.starts_at, TimetableSession.id)
+            else:
+                statement = statement.where(
+                    (TimetableSession.starts_at < starts_at)
+                    | (
+                        (TimetableSession.starts_at == starts_at)
+                        & (TimetableSession.id < session_id)
+                    )
+                ).order_by(TimetableSession.starts_at.desc(), TimetableSession.id.desc())
+        elif params.direction == CursorDirection.PREVIOUS:
+            raise AppError(
+                "cursor is required for previous navigation", HTTPStatus.UNPROCESSABLE_ENTITY
+            )
+        else:
+            statement = statement.order_by(TimetableSession.starts_at, TimetableSession.id)
+        rows = list((await session.scalars(statement.limit(params.limit + 1))).all())
+        has_more = len(rows) > params.limit
+        items = rows[: params.limit]
+        if params.direction == CursorDirection.PREVIOUS:
+            items.reverse()
+        has_next = (
+            has_more if params.direction == CursorDirection.NEXT else params.cursor is not None
+        )
+        has_previous = (
+            params.cursor is not None if params.direction == CursorDirection.NEXT else has_more
+        )
+        return CursorResult(
+            items=items,
+            meta=CursorMeta(
+                limit=params.limit,
+                next_cursor=(
+                    encode_cursor(items[-1].starts_at.isoformat(), items[-1].id)
+                    if has_next and items
+                    else None
+                ),
+                previous_cursor=(
+                    encode_cursor(items[0].starts_at.isoformat(), items[0].id)
+                    if has_previous and items
+                    else None
+                ),
+                has_next=has_next,
+                has_previous=has_previous,
+            ),
+        )

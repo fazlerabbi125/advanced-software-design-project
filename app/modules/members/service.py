@@ -1,3 +1,4 @@
+from http import HTTPStatus
 from uuid import UUID
 
 from sqlalchemy import select
@@ -20,11 +21,11 @@ class MemberService:
             select(MemberProfile).where(MemberProfile.user_id == user_id)
         )
         if profile is None:
-            raise AppError("member profile does not exist", 404)
+            raise AppError("member profile does not exist", HTTPStatus.NOT_FOUND)
         try:
             stored_image = await self.storage.save(user_id, upload)
         except ValueError as error:
-            raise AppError(str(error), 422) from error
+            raise AppError(str(error), HTTPStatus.UNPROCESSABLE_ENTITY) from error
         profile.biometric_image_key = stored_image.key
         profile.biometric_content_type = stored_image.content_type
         profile.biometric_uploaded_at = utc_now()

@@ -7,9 +7,9 @@ from app.core.exceptions import AppError, http_error
 from app.models.access import AccessEvent, AccessZone
 from app.models.auth import User, UserRole
 from app.modules.access.dependencies import (
-    AccessServiceDependency,
-    BiometricAccessServiceDependency,
-    ScannerDeviceDependency,
+    AccessServiceDep,
+    AuthenticatedScannerDep,
+    ScannerCheckInServiceDep,
 )
 from app.modules.access.schemas import (
     AccessLogResponse,
@@ -32,11 +32,11 @@ router = APIRouter(prefix="/access", tags=["access"])
 async def check_in(
     payload: CheckInRequest,
     session: DbSessionDep,
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     current_user: CurrentUser,
 ) -> Any:
     member_id = payload.member_id or current_user.id
-    if member_id != current_user.id and current_user.role not in {UserRole.STAFF, UserRole.MANAGER}:
+    if member_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
         )
@@ -64,7 +64,7 @@ async def check_in(
 async def manual_check_in(
     payload: ManualCheckInRequest,
     session: DbSessionDep,
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     staff: Annotated[User, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
 ) -> Any:
     result = None
@@ -99,7 +99,7 @@ async def manual_check_in(
 async def check_out(
     payload: CheckInRequest,
     session: DbSessionDep,
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     current_user: CurrentUser,
 ) -> Any:
     member_id = payload.member_id or current_user.id
@@ -119,7 +119,7 @@ async def check_out(
 
 @router.get("/occupancy", description="Show current zone occupancy for staff.")
 async def current_occupancy(
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     _: Annotated[object, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
 ) -> dict[str, int]:
     return await service.current_occupancy()
@@ -134,8 +134,8 @@ async def current_occupancy(
 async def device_check_in(
     payload: DeviceCheckInRequest,
     session: DbSessionDep,
-    service: BiometricAccessServiceDependency,
-    scanner: ScannerDeviceDependency,
+    service: ScannerCheckInServiceDep,
+    scanner: AuthenticatedScannerDep,
 ) -> Any:
     result = None
     try:
@@ -163,7 +163,7 @@ async def device_check_in(
 )
 async def my_waitlist_position(
     zone: AccessZone,
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     current_user: CurrentUser,
 ) -> Any:
     position = await service.waitlist_position(current_user.id, zone)
@@ -175,7 +175,7 @@ async def my_waitlist_position(
 )
 async def leave_waitlist(
     zone: AccessZone,
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     current_user: CurrentUser,
 ) -> None:
     await service.leave_waitlist(current_user.id, zone)

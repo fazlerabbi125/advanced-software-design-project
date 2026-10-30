@@ -6,7 +6,7 @@ from uuid import UUID
 from redis.asyncio import Redis
 
 from app.core.redis import get_redis_client
-from app.shared.constants import VIP_WAITLIST_HOLD_MINUTES, CacheKey
+from app.shared.constants import VIP_WAITLIST_HOLD_SECONDS, CacheKey
 
 # Runs inside Redis as a single step, so two people arriving at the same moment
 # cannot both take the last free place, and nobody can jump the waiting list.
@@ -86,7 +86,7 @@ class ZoneOccupancy:
                 str(member_id),
                 capacity or 0,
                 CacheKey.OCCUPANCY.ttl_seconds,
-                VIP_WAITLIST_HOLD_MINUTES * 60,
+                VIP_WAITLIST_HOLD_SECONDS,
             )
         )
         if result == 1:
@@ -109,7 +109,7 @@ class ZoneOccupancy:
     async def waitlist_position(self, zone: str, member_id: UUID) -> int | None:
         """The member's place on the zone's waiting list (1 = next in), or None."""
         key = CacheKey.VIP_WAITLIST.build(zone)
-        oldest_kept = time.time() - VIP_WAITLIST_HOLD_MINUTES * 60
+        oldest_kept = time.time() - VIP_WAITLIST_HOLD_SECONDS
         async with self.client.pipeline(transaction=True) as pipeline:
             pipeline.zremrangebyscore(key, "-inf", oldest_kept)
             pipeline.zrank(key, str(member_id))

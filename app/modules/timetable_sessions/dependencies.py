@@ -9,4 +9,4 @@ def get_timetable_service() -> TimetableService:
     return TimetableService()
 
 
-TimetableServiceDependency = Annotated[TimetableService, Depends(get_timetable_service)]
+TimetableServiceDep = Annotated[TimetableService, Depends(get_timetable_service)]

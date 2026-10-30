@@ -6,7 +6,7 @@ from app.core.dependencies import DbSessionDep
 from app.core.exceptions import AppError, http_error
 from app.models.auth import UserRole
 from app.modules.auth.dependencies import CurrentUser, require_roles
-from app.modules.memberships.dependencies import MembershipServiceDependency
+from app.modules.memberships.dependencies import MembershipServiceDep
 from app.modules.memberships.schemas import (
     CreatePlanRequest,
     MembershipResponse,
@@ -16,29 +16,37 @@ from app.modules.memberships.schemas import (
     UpdatePlanRequest,
 )
 from app.modules.notifications.dependencies import (
-    NotificationObserverDependency,
-    NotificationPublisherDependency,
+    NotificationObserverDep,
+    NotificationPublisherDep,
 )
+from app.shared.pagination import CursorParamsDep, CursorResponse, PageParamsDep, PageResponse
 
 router = APIRouter(prefix="/memberships", tags=["memberships"])
 
 
 @router.get(
-    "/plans", response_model=list[PlanResponse], description="List plans currently on sale."
+    "/plans", response_model=PageResponse[PlanResponse], description="List plans currently on sale."
 )
-async def list_plans(session: DbSessionDep, service: MembershipServiceDependency) -> Any:
-    return await service.list_plans(session)
+async def list_plans(
+    session: DbSessionDep, service: MembershipServiceDep, params: PageParamsDep
+) -> Any:
+    result = await service.list_plans(session, params)
+    return {"items": result.items, "meta": result.meta}
 
 
 @router.get(
-    "/plans/all", response_model=list[PlanResponse], description="List all plans for managers."
+    "/plans/all",
+    response_model=PageResponse[PlanResponse],
+    description="List all plans for managers.",
 )
 async def list_all_plans(
     session: DbSessionDep,
-    service: MembershipServiceDependency,
+    service: MembershipServiceDep,
+    params: PageParamsDep,
     _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
 ) -> Any:
-    return await service.list_all_plans(session)
+    result = await service.list_all_plans(session, params)
+    return {"items": result.items, "meta": result.meta}
 
 
 @router.post(
@@ -50,7 +58,7 @@ async def list_all_plans(
 async def create_plan(
     payload: CreatePlanRequest,
     session: DbSessionDep,
-    service: MembershipServiceDependency,
+    service: MembershipServiceDep,
     _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
 ) -> Any:
     try:
@@ -72,7 +80,7 @@ async def update_plan(
     plan_id: int,
     payload: UpdatePlanRequest,
     session: DbSessionDep,
-    service: MembershipServiceDependency,
+    service: MembershipServiceDep,
     _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
 ) -> Any:
     changes = payload.model_dump(exclude_none=True)
@@ -95,7 +103,7 @@ async def update_plan(
 async def deactivate_plan(
     plan_id: int,
     session: DbSessionDep,
-    service: MembershipServiceDependency,
+    service: MembershipServiceDep,
     _: Annotated[object, Depends(require_roles(UserRole.MANAGER))],
 ) -> None:
     try:
@@ -119,7 +127,7 @@ async def purchase_membership(
     payload: PurchaseRequest,
     current_user: CurrentUser,
     session: DbSessionDep,
-    service: MembershipServiceDependency,
+    service: MembershipServiceDep,
 ) -> Any:
     try:
         result = await service.purchase(session, current_user.id, payload.plan_id)
@@ -133,11 +141,17 @@ async def purchase_membership(
     return result
 
 
-@router.get("/me", response_model=list[MembershipResponse], description="List your memberships.")
+@router.get(
+    "/me", response_model=CursorResponse[MembershipResponse], description="List your memberships."
+)
 async def list_my_memberships(
-    current_user: CurrentUser, session: DbSessionDep, service: MembershipServiceDependency
+    current_user: CurrentUser,
+    session: DbSessionDep,
+    service: MembershipServiceDep,
+    params: CursorParamsDep,
 ) -> Any:
-    return await service.list_for_user(session, current_user.id)
+    result = await service.list_for_user(session, current_user.id, params)
+    return {"items": result.items, "meta": result.meta}
 
 
 @router.post(
@@ -146,9 +160,9 @@ async def list_my_memberships(
 async def cancel_my_membership(
     current_user: CurrentUser,
     session: DbSessionDep,
-    service: MembershipServiceDependency,
-    notifications: NotificationObserverDependency,
-    publisher: NotificationPublisherDependency,
+    service: MembershipServiceDep,
+    notifications: NotificationObserverDep,
+    publisher: NotificationPublisherDep,
 ) -> Any:
     try:
         pending_notifications: list = []
@@ -172,9 +186,9 @@ async def cancel_my_membership(
 async def renew_my_membership(
     current_user: CurrentUser,
     session: DbSessionDep,
-    service: MembershipServiceDependency,
-    notifications: NotificationObserverDependency,
-    publisher: NotificationPublisherDependency,
+    service: MembershipServiceDep,
+    notifications: NotificationObserverDep,
+    publisher: NotificationPublisherDep,
 ) -> Any:
     try:
         pending_notifications: list = []

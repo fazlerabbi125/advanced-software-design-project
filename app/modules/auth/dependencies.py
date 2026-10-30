@@ -16,13 +16,13 @@ def get_auth_service() -> AuthService:
     return AuthService()
 
 
-AuthServiceDependency = Annotated[AuthService, Depends(get_auth_service)]
+AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     session: DbSessionDep,
-    service: AuthServiceDependency,
+    service: AuthServiceDep,
 ) -> User:
     if credentials is None:
         raise HTTPException(

@@ -1,5 +1,7 @@
 """Business logic for verified Stripe webhook events."""
 
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.memberships import Membership, MembershipStatus, StripeEvent
 from app.models.notifications import NotificationType
 from app.modules.notifications.service import NotificationEvent, NotificationObserver
+
+logger = logging.getLogger(__name__)
 
 
 class StripeWebhookService:
@@ -35,6 +39,11 @@ class StripeWebhookService:
         if membership is None:
             return "unknown_checkout"
         if membership.status != MembershipStatus.PENDING:
+            if payment_succeeded:
+                logger.warning(
+                    "Ignored paid Stripe Checkout for non-pending membership: membership_id=%s",
+                    membership.id,
+                )
             return "ignored"
 
         inserted_event_id = await session.scalar(

@@ -1,7 +1,10 @@
+"""Member and staff access-operation orchestration."""
+
 import logging
 from asyncio import gather
 from collections.abc import Mapping
 from dataclasses import dataclass
+from http import HTTPStatus
 from uuid import UUID
 
 from redis.exceptions import RedisError
@@ -44,15 +47,18 @@ class AccessService:
         reason: str | None = None,
     ) -> CheckInResult:
         if event == AccessEvent.MANUAL_CHECK_IN and (staff_id is None or not reason):
-            raise AppError("a manual check-in must record the staff member and a reason", 422)
+            raise AppError(
+                "a manual check-in must record the staff member and a reason",
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+            )
         # Scanner and staff check-ins name the member directly, so the account itself must be
         # checked here; a disabled account is refused even if its membership is still active.
         member = await session.get(User, member_id)
         if member is None or not member.is_active:
-            raise AppError("this member account is not active", 403)
+            raise AppError("this member account is not active", HTTPStatus.FORBIDDEN)
         policy = self.policies.get(zone)
         if policy is None:
-            raise AppError("no access rule is set up for this zone", 403)
+            raise AppError("no access rule is set up for this zone", HTTPStatus.FORBIDDEN)
         # On success the policy has already counted the member in the zone.
         took_new_place = await policy.check(session, member_id, zone)
 

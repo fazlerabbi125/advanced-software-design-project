@@ -6,6 +6,7 @@ leaves the transaction open, so the caller can move or cancel the unit's future 
 """
 
 from datetime import datetime
+from http import HTTPStatus
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.models.facilities import EquipmentFault, EquipmentUnit, FaultStatus
 from app.shared.helpers import utc_now
+from app.shared.pagination import PageMeta, PageParams, PageResult
 
 
 def normalise_equipment_type(value: str) -> str:
@@ -31,7 +33,7 @@ class FacilitiesService:
             select(EquipmentUnit.id).where(func.lower(EquipmentUnit.name) == name.lower())
         )
         if taken is not None:
-            raise AppError(f"a unit called {name!r} already exists", 409)
+            raise AppError(f"a unit called {name!r} already exists", HTTPStatus.CONFLICT)
         unit = EquipmentUnit(
             name=name, equipment_type=normalise_equipment_type(equipment_type), zone=zone
         )
@@ -40,23 +42,39 @@ class FacilitiesService:
             await session.flush()
         except IntegrityError as error:
             # Another request registered the same name between the check and the insert.
-            raise AppError(f"a unit called {name!r} already exists", 409) from error
+            raise AppError(f"a unit called {name!r} already exists", HTTPStatus.CONFLICT) from error
         return unit
 
     async def list_units(
-        self, session: AsyncSession, equipment_type: str | None = None
-    ) -> list[EquipmentUnit]:
-        statement = select(EquipmentUnit).order_by(EquipmentUnit.equipment_type, EquipmentUnit.name)
+        self, session: AsyncSession, params: PageParams, equipment_type: str | None = None
+    ) -> PageResult[EquipmentUnit]:
+        filters = []
         if equipment_type is not None:
-            statement = statement.where(
-                EquipmentUnit.equipment_type == normalise_equipment_type(equipment_type)
-            )
-        return list((await session.scalars(statement)).all())
+            filters.append(EquipmentUnit.equipment_type == normalise_equipment_type(equipment_type))
+        total_count = (
+            await session.scalar(select(func.count(EquipmentUnit.id)).where(*filters)) or 0
+        )
+        statement = (
+            select(EquipmentUnit)
+            .where(*filters)
+            .order_by(EquipmentUnit.equipment_type, EquipmentUnit.name, EquipmentUnit.id)
+            .offset(params.offset)
+            .limit(params.limit)
+        )
+        return PageResult(
+            items=list((await session.scalars(statement)).all()),
+            meta=PageMeta(
+                page=params.page,
+                limit=params.limit,
+                total_pages=(total_count + params.limit - 1) // params.limit,
+                total_count=total_count,
+            ),
+        )
 
     async def get_unit(self, session: AsyncSession, unit_id: int) -> EquipmentUnit:
         unit = await session.get(EquipmentUnit, unit_id)
         if unit is None:
-            raise AppError("equipment unit was not found", 404)
+            raise AppError("equipment unit was not found", HTTPStatus.NOT_FOUND)
         return unit
 
     async def report_fault(
@@ -74,12 +92,30 @@ class FacilitiesService:
         return fault
 
     async def list_faults(
-        self, session: AsyncSession, status: FaultStatus | None = None
-    ) -> list[EquipmentFault]:
-        statement = select(EquipmentFault).order_by(EquipmentFault.created_at.desc())
+        self, session: AsyncSession, params: PageParams, status: FaultStatus | None = None
+    ) -> PageResult[EquipmentFault]:
+        filters = []
         if status is not None:
-            statement = statement.where(EquipmentFault.status == status)
-        return list((await session.scalars(statement)).all())
+            filters.append(EquipmentFault.status == status)
+        total_count = (
+            await session.scalar(select(func.count(EquipmentFault.id)).where(*filters)) or 0
+        )
+        statement = (
+            select(EquipmentFault)
+            .where(*filters)
+            .order_by(EquipmentFault.created_at.desc(), EquipmentFault.id.desc())
+            .offset(params.offset)
+            .limit(params.limit)
+        )
+        return PageResult(
+            items=list((await session.scalars(statement)).all()),
+            meta=PageMeta(
+                page=params.page,
+                limit=params.limit,
+                total_pages=(total_count + params.limit - 1) // params.limit,
+                total_count=total_count,
+            ),
+        )
 
     async def confirm_fault(
         self, session: AsyncSession, fault_id: int, staff_id: UUID, now: datetime | None = None
@@ -145,8 +181,8 @@ class FacilitiesService:
             select(EquipmentFault).where(EquipmentFault.id == fault_id).with_for_update()
         )
         if fault is None:
-            raise AppError("fault was not found", 404)
+            raise AppError("fault was not found", HTTPStatus.NOT_FOUND)
         if fault.status != expected:
             message = f"a {fault.status.value} fault cannot be changed this way"
-            raise AppError(message, 409)
+            raise AppError(message, HTTPStatus.CONFLICT)
         return fault

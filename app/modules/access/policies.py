@@ -1,4 +1,5 @@
 import logging
+from http import HTTPStatus
 from typing import Protocol
 from uuid import UUID
 
@@ -10,7 +11,7 @@ from app.models.access import AccessZone
 from app.models.memberships import MembershipEntitlement
 from app.modules.access.occupancy import EntryOutcome, ZoneOccupancy
 from app.modules.memberships.service import MembershipService
-from app.shared.constants import ZONE_STAY_MINUTES
+from app.shared.constants import SECONDS_PER_MINUTE, ZONE_STAY_MINUTES
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class AccessPolicy(Protocol):
 
 
 def stay_seconds(zone: AccessZone) -> int:
-    return ZONE_STAY_MINUTES[zone.value] * 60
+    return ZONE_STAY_MINUTES[zone.value] * SECONDS_PER_MINUTE
 
 
 class GymFloorPolicy:
@@ -43,7 +44,9 @@ class GymFloorPolicy:
         if not await self.memberships.has_entitlement(
             session, member_id, MembershipEntitlement.GYM_FLOOR_ACCESS
         ):
-            raise AppError("your membership plan does not allow access to this zone", 403)
+            raise AppError(
+                "your membership plan does not allow access to this zone", HTTPStatus.FORBIDDEN
+            )
         try:
             entry = await self.occupancy.enter(zone.value, member_id, stay_seconds(zone))
         except RedisError:
@@ -70,7 +73,9 @@ class VipAreaPolicy:
         if not await self.memberships.has_entitlement(
             session, member_id, MembershipEntitlement.VIP_AREA_ACCESS
         ):
-            raise AppError("your membership plan does not allow access to this zone", 403)
+            raise AppError(
+                "your membership plan does not allow access to this zone", HTTPStatus.FORBIDDEN
+            )
         try:
             entry = await self.occupancy.enter(
                 zone.value, member_id, stay_seconds(zone), self.capacity
@@ -79,14 +84,15 @@ class VipAreaPolicy:
             # Without the count we cannot keep to the limit, so the room stays closed.
             logger.exception("Unable to check capacity for zone %s", zone.value)
             raise AppError(
-                "VIP entry is unavailable right now, please ask a member of staff", 403
+                "VIP entry is unavailable right now, please ask a member of staff",
+                HTTPStatus.FORBIDDEN,
             ) from error
         if entry.outcome == EntryOutcome.WAITLISTED:
             room = zone.value.removeprefix("vip_").replace("_", " ")
             raise AppError(
                 f"the {room} is full, you are number "
                 f"{entry.waitlist_position or 1} on the waiting list",
-                409,
+                HTTPStatus.CONFLICT,
             )
         return entry.outcome == EntryOutcome.ADMITTED
 

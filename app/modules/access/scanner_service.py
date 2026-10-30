@@ -1,5 +1,8 @@
+"""Trusted biometric-scanner check-in orchestration."""
+
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from http import HTTPStatus
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,28 +11,28 @@ from app.core.config import get_settings
 from app.core.exceptions import AppError
 from app.models.access import AccessZone, DeniedAccessAttempt, DeniedAccessReason
 from app.models.members import MemberProfile
+from app.modules.access.access_service import AccessService, CheckInResult
 from app.modules.access.schemas import DeviceCheckInRequest
-from app.modules.access.service import AccessService, CheckInResult
 
 
 @dataclass(frozen=True, slots=True)
-class ScannerDevice:
+class AuthenticatedScanner:
     zone: AccessZone
     key_fingerprint: str
 
 
-class BiometricAccessService:
+class ScannerCheckInService:
     """Applies trusted scanner matches without loading every member profile."""
 
     def __init__(self, access: AccessService) -> None:
         self.access = access
 
     async def check_in(
-        self, session: AsyncSession, payload: DeviceCheckInRequest, scanner: ScannerDevice
+        self, session: AsyncSession, payload: DeviceCheckInRequest, scanner: AuthenticatedScanner
     ) -> CheckInResult:
         if payload.confidence < get_settings().biometric_min_confidence:
             await self._record_denial(session, payload, scanner, DeniedAccessReason.LOW_CONFIDENCE)
-            raise AppError("biometric confidence is too low", 403)
+            raise AppError("biometric confidence is too low", HTTPStatus.FORBIDDEN)
 
         profile = await session.scalar(
             select(MemberProfile).where(MemberProfile.biometric_template_id == payload.template_id)
@@ -38,7 +41,7 @@ class BiometricAccessService:
             await self._record_denial(
                 session, payload, scanner, DeniedAccessReason.UNKNOWN_TEMPLATE
             )
-            raise AppError("unknown biometric template", 403)
+            raise AppError("unknown biometric template", HTTPStatus.FORBIDDEN)
 
         try:
             return await self.access.check_in(
@@ -47,7 +50,7 @@ class BiometricAccessService:
         except AppError as error:
             reason = (
                 DeniedAccessReason.ZONE_FULL
-                if error.status_code == 409
+                if error.status_code == HTTPStatus.CONFLICT
                 else DeniedAccessReason.ACCESS_DENIED
             )
             await self._record_denial(session, payload, scanner, reason)
@@ -57,7 +60,7 @@ class BiometricAccessService:
         self,
         session: AsyncSession,
         payload: DeviceCheckInRequest,
-        scanner: ScannerDevice,
+        scanner: AuthenticatedScanner,
         reason: DeniedAccessReason,
     ) -> None:
         session.add(

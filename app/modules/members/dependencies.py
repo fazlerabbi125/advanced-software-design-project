@@ -11,4 +11,4 @@ def get_member_service() -> MemberService:
     return MemberService(BiometricImageStorage(get_photo_validator()))
 
 
-MemberServiceDependency = Annotated[MemberService, Depends(get_member_service)]
+MemberServiceDep = Annotated[MemberService, Depends(get_member_service)]

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.notifications import Notification, NotificationType
 from app.modules.notifications.schemas import NotificationResponse
+from app.shared.constants import NOTIFICATION_SSE_POLL_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -106,11 +107,15 @@ class NotificationFeed:
         pubsub = self.redis.pubsub()
         await pubsub.subscribe(NotificationPublisher.channel(user_id))
         try:
-            for notification in await self.unread_for_user(session, user_id):
+            unread = await self.unread_for_user(session, user_id)
+            await session.rollback()
+            for notification in unread:
                 yield self._sse(NotificationPublisher.payload(notification), notification.id)
             while not await is_disconnected():
                 try:
-                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15.0)
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=NOTIFICATION_SSE_POLL_SECONDS
+                    )
                 except RedisError:
                     logger.exception("Notification SSE subscription failed for user_id=%s", user_id)
                     return
@@ -120,7 +125,7 @@ class NotificationFeed:
                     data = str(message["data"])
                     try:
                         notification_id = int(json.loads(data)["id"])
-                    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    except (KeyError, TypeError, ValueError):
                         logger.warning(
                             "Discarded malformed notification message for user_id=%s", user_id
                         )

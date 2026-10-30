@@ -16,8 +16,8 @@ def get_outage_handler() -> UnitOutageHandler:
     return UnitOutageHandler()
 
 
-FacilitiesServiceDependency = Annotated[FacilitiesService, Depends(get_facilities_service)]
+FacilitiesServiceDep = Annotated[FacilitiesService, Depends(get_facilities_service)]
 # Shares the request's database session with FacilitiesService, so confirming a fault and
 # moving or cancelling the unit's slots commit together.
-OutageHandlerDependency = Annotated[UnitOutageHandler, Depends(get_outage_handler)]
+OutageHandlerDep = Annotated[UnitOutageHandler, Depends(get_outage_handler)]
 StaffUser = Annotated[User, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))]

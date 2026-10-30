@@ -11,10 +11,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from app.core.config import Settings, get_settings
 from app.core.dependencies import DbSessionDep
 from app.modules.notifications.dependencies import (
-    NotificationObserverDependency,
-    NotificationPublisherDependency,
+    NotificationObserverDep,
+    NotificationPublisherDep,
 )
-from app.modules.payments.dependencies import StripeWebhookServiceDependency
+from app.modules.payments.dependencies import StripeWebhookServiceDep
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +29,9 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 async def stripe_webhook(
     request: Request,
     session: DbSessionDep,
-    service: StripeWebhookServiceDependency,
-    notifications: NotificationObserverDependency,
-    publisher: NotificationPublisherDependency,
+    service: StripeWebhookServiceDep,
+    notifications: NotificationObserverDep,
+    publisher: NotificationPublisherDep,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, str]:
     # Stripe signs these exact bytes; verification must happen before parsing.

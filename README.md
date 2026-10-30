@@ -51,7 +51,7 @@ The business rules include membership plans with configurable booking windows an
 The project follows a **monolithic MVC/REST architecture**:
 
 - **Models** (`app/models/`) — SQLAlchemy ORM models define the database schema.
-- **Services** (`app/modules/*/service.py`) — contain all business logic; routers never query the database directly.
+- **Services** (`app/modules/*/*_service.py`) — contain all business logic; routers never query the database directly.
 - **Routers/Controllers** (`app/modules/*/endpoints/v1.py`) — FastAPI route handlers that validate requests, call services, and return responses.
 
 ### Data Models & Entity Relationships
@@ -328,7 +328,7 @@ Copy the displayed `whsec_...` value into `.env` and restart the host-run FastAP
 
 Redis must be running (`cache-redis` from either Compose file) before testing notifications.
 
-1. Register and log in as a member. In Swagger, click **Authorize** and enter `Bearer <access token>`.
+1. Register and log in as a member. In Swagger, click **Authorize** and enter only the access token; Swagger adds the `Bearer` prefix.
 2. In a second terminal, keep the authenticated stream open with curl:
 
    ```powershell

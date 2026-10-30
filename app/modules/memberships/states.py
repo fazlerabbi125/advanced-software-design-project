@@ -13,6 +13,7 @@ behaves differently depending on the state the membership is in.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date, timedelta
+from http import HTTPStatus
 
 from app.core.exceptions import AppError
 from app.models.memberships import Membership, MembershipStatus
@@ -64,7 +65,7 @@ class ExpiredState(MembershipState):
     status = MembershipStatus.EXPIRED
 
     def cancel(self, membership: Membership) -> None:
-        raise AppError("an expired membership cannot be cancelled", 409)
+        raise AppError("an expired membership cannot be cancelled", HTTPStatus.CONFLICT)
 
     def renewal_terms(
         self, membership: Membership, duration_days: int, today: date
@@ -77,25 +78,26 @@ class PendingState(MembershipState):
     status = MembershipStatus.PENDING
 
     def cancel(self, membership: Membership) -> None:
-        membership.status = MembershipStatus.CANCELLED
+        raise AppError("a pending membership cannot be cancelled", HTTPStatus.CONFLICT)
 
     def renewal_terms(
         self, membership: Membership, duration_days: int, today: date
     ) -> RenewalTerms:
-        raise AppError("A pending membership cannot be renewed", 409)
+        raise AppError("a pending membership cannot be renewed", HTTPStatus.CONFLICT)
 
 
 class CancelledState(MembershipState):
     status = MembershipStatus.CANCELLED
 
     def cancel(self, membership: Membership) -> None:
-        raise AppError("this membership is already cancelled", 409)
+        raise AppError("this membership is already cancelled", HTTPStatus.CONFLICT)
 
     def renewal_terms(
         self, membership: Membership, duration_days: int, today: date
     ) -> RenewalTerms:
         raise AppError(
-            "a cancelled membership cannot be renewed, please buy a new plan instead", 409
+            "a cancelled membership cannot be renewed, please buy a new plan instead",
+            HTTPStatus.CONFLICT,
         )
 
 

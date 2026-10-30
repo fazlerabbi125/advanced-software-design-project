@@ -6,12 +6,13 @@ from app.core.dependencies import DbSessionDep
 from app.core.exceptions import AppError, http_error
 from app.models.auth import UserRole
 from app.modules.auth.dependencies import CurrentUser, require_roles
-from app.modules.timetable_sessions.dependencies import TimetableServiceDependency
+from app.modules.timetable_sessions.dependencies import TimetableServiceDep
 from app.modules.timetable_sessions.schemas import (
     CreateSessionRequest,
     GenerateEquipmentSlotsRequest,
     SessionResponse,
 )
+from app.shared.pagination import CursorParamsDep, CursorResponse
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 async def create_session(
     payload: CreateSessionRequest,
     session: DbSessionDep,
-    service: TimetableServiceDependency,
+    service: TimetableServiceDep,
     _: Annotated[object, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
 ) -> Any:
     try:
@@ -49,7 +50,7 @@ async def create_session(
 async def generate_equipment_slots(
     payload: GenerateEquipmentSlotsRequest,
     session: DbSessionDep,
-    service: TimetableServiceDependency,
+    service: TimetableServiceDep,
     _: Annotated[object, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
 ) -> Any:
     try:
@@ -65,9 +66,15 @@ async def generate_equipment_slots(
 
 
 @router.get(
-    "", response_model=list[SessionResponse], description="List upcoming timetable sessions."
+    "",
+    response_model=CursorResponse[SessionResponse],
+    description="List upcoming timetable sessions.",
 )
 async def list_upcoming_sessions(
-    _: CurrentUser, session: DbSessionDep, service: TimetableServiceDependency
+    _: CurrentUser,
+    session: DbSessionDep,
+    service: TimetableServiceDep,
+    params: CursorParamsDep,
 ) -> Any:
-    return await service.upcoming(session)
+    result = await service.upcoming(session, params)
+    return {"items": result.items, "meta": result.meta}

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from http import HTTPStatus
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -20,6 +21,16 @@ from app.models.notifications import NotificationType
 from app.modules.memberships.payment_gateway import PaymentGateway, PaymentResult, PaymentStatus
 from app.modules.memberships.states import state_of
 from app.modules.notifications.service import NotificationEvent, NotificationObserver
+from app.shared.pagination import (
+    CursorDirection,
+    CursorMeta,
+    CursorParams,
+    CursorResult,
+    PageMeta,
+    PageParams,
+    PageResult,
+    encode_cursor,
+)
 
 # Plan columns a manager may set. Entitlements are handled separately because they are rows.
 EDITABLE_PLAN_FIELDS = frozenset(
@@ -51,31 +62,112 @@ class MembershipService:
         self.payment_gateway = payment_gateway
         self.notifications = notifications
 
-    async def list_for_user(self, session: AsyncSession, user_id: UUID) -> list[Membership]:
-        statement = (
-            select(Membership)
-            .where(Membership.user_id == user_id)
-            .order_by(Membership.ends_on.desc())
+    async def list_for_user(
+        self, session: AsyncSession, user_id: UUID, params: CursorParams
+    ) -> CursorResult[Membership]:
+        statement = select(Membership).where(Membership.user_id == user_id)
+        if params.values:
+            if len(params.values) != 2 or not isinstance(params.values[0], str):
+                raise AppError("cursor is invalid", HTTPStatus.UNPROCESSABLE_ENTITY)
+            try:
+                ends_on = date.fromisoformat(params.values[0])
+                membership_id = int(params.values[1])
+            except (TypeError, ValueError) as error:
+                raise AppError("cursor is invalid", HTTPStatus.UNPROCESSABLE_ENTITY) from error
+            if params.direction == CursorDirection.NEXT:
+                statement = statement.where(
+                    (Membership.ends_on < ends_on)
+                    | ((Membership.ends_on == ends_on) & (Membership.id < membership_id))
+                ).order_by(Membership.ends_on.desc(), Membership.id.desc())
+            else:
+                statement = statement.where(
+                    (Membership.ends_on > ends_on)
+                    | ((Membership.ends_on == ends_on) & (Membership.id > membership_id))
+                ).order_by(Membership.ends_on, Membership.id)
+        elif params.direction == CursorDirection.PREVIOUS:
+            raise AppError(
+                "cursor is required for previous navigation", HTTPStatus.UNPROCESSABLE_ENTITY
+            )
+        else:
+            statement = statement.order_by(Membership.ends_on.desc(), Membership.id.desc())
+        rows = list((await session.scalars(statement.limit(params.limit + 1))).all())
+        has_more = len(rows) > params.limit
+        items = rows[: params.limit]
+        if params.direction == CursorDirection.PREVIOUS:
+            items.reverse()
+        has_next = (
+            has_more if params.direction == CursorDirection.NEXT else params.cursor is not None
         )
-        return list((await session.scalars(statement)).all())
+        has_previous = (
+            params.cursor is not None if params.direction == CursorDirection.NEXT else has_more
+        )
+        return CursorResult(
+            items=items,
+            meta=CursorMeta(
+                limit=params.limit,
+                next_cursor=(
+                    encode_cursor(items[-1].ends_on.isoformat(), items[-1].id)
+                    if has_next and items
+                    else None
+                ),
+                previous_cursor=(
+                    encode_cursor(items[0].ends_on.isoformat(), items[0].id)
+                    if has_previous and items
+                    else None
+                ),
+                has_next=has_next,
+                has_previous=has_previous,
+            ),
+        )
 
-    async def list_plans(self, session: AsyncSession) -> list[MembershipPlan]:
+    async def list_plans(
+        self, session: AsyncSession, params: PageParams
+    ) -> PageResult[MembershipPlan]:
+        filters = (MembershipPlan.is_active.is_(True), MembershipPlan.price_minor > 0)
+        total_count = (
+            await session.scalar(select(func.count(MembershipPlan.id)).where(*filters)) or 0
+        )
         statement = (
             select(MembershipPlan)
-            .where(MembershipPlan.is_active.is_(True), MembershipPlan.price_minor > 0)
+            .where(*filters)
             .options(selectinload(MembershipPlan.entitlements))
-            .order_by(MembershipPlan.price_minor)
+            .order_by(MembershipPlan.price_minor, MembershipPlan.id)
+            .offset(params.offset)
+            .limit(params.limit)
         )
-        return list((await session.scalars(statement)).all())
+        return PageResult(
+            items=list((await session.scalars(statement)).all()),
+            meta=PageMeta(
+                page=params.page,
+                limit=params.limit,
+                total_pages=(total_count + params.limit - 1) // params.limit,
+                total_count=total_count,
+            ),
+        )
 
-    async def list_all_plans(self, session: AsyncSession) -> list[MembershipPlan]:
+    async def list_all_plans(
+        self, session: AsyncSession, params: PageParams
+    ) -> PageResult[MembershipPlan]:
         """Every plan, including deactivated ones, for managers."""
+        total_count = await session.scalar(select(func.count(MembershipPlan.id))) or 0
         statement = (
             select(MembershipPlan)
             .options(selectinload(MembershipPlan.entitlements))
-            .order_by(MembershipPlan.is_active.desc(), MembershipPlan.price_minor)
+            .order_by(
+                MembershipPlan.is_active.desc(), MembershipPlan.price_minor, MembershipPlan.id
+            )
+            .offset(params.offset)
+            .limit(params.limit)
         )
-        return list((await session.scalars(statement)).all())
+        return PageResult(
+            items=list((await session.scalars(statement)).all()),
+            meta=PageMeta(
+                page=params.page,
+                limit=params.limit,
+                total_pages=(total_count + params.limit - 1) // params.limit,
+                total_count=total_count,
+            ),
+        )
 
     async def get_plan(self, session: AsyncSession, plan_id: int) -> MembershipPlan:
         plan = await session.scalar(
@@ -84,7 +176,7 @@ class MembershipService:
             .options(selectinload(MembershipPlan.entitlements))
         )
         if plan is None:
-            raise AppError("membership plan was not found", 404)
+            raise AppError("membership plan was not found", HTTPStatus.NOT_FOUND)
         return plan
 
     async def create_plan(
@@ -128,7 +220,10 @@ class MembershipService:
         and entitlements apply to their next booking or check-in."""
         unknown = changes.keys() - EDITABLE_PLAN_FIELDS
         if unknown:
-            raise AppError(f"cannot change plan fields: {', '.join(sorted(unknown))}", 422)
+            raise AppError(
+                f"cannot change plan fields: {', '.join(sorted(unknown))}",
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+            )
         plan = await self.get_plan(session, plan_id)
         new_name = changes.get("name")
         if isinstance(new_name, str) and new_name.lower() != plan.name.lower():
@@ -159,17 +254,17 @@ class MembershipService:
         if ignore_plan_id is not None:
             statement = statement.where(MembershipPlan.id != ignore_plan_id)
         if await session.scalar(statement) is not None:
-            raise AppError("a plan with this name already exists", 409)
+            raise AppError("a plan with this name already exists", HTTPStatus.CONFLICT)
 
     async def _flush_plan_change(self, session: AsyncSession) -> None:
         try:
             await session.flush()
         except IntegrityError as error:
-            raise AppError("a plan with this name already exists", 409) from error
+            raise AppError("a plan with this name already exists", HTTPStatus.CONFLICT) from error
 
     async def purchase(self, session: AsyncSession, user_id: UUID, plan_id: int) -> PurchaseResult:
         if self.payment_gateway is None:
-            raise AppError("payment gateway is not configured", 500)
+            raise AppError("payment gateway is not configured", HTTPStatus.INTERNAL_SERVER_ERROR)
 
         # A plan without a price is not on sale, so it is treated as not found.
         plan = await session.scalar(
@@ -180,24 +275,24 @@ class MembershipService:
             )
         )
         if plan is None:
-            raise AppError("membership plan was not found", 404)
+            raise AppError("membership plan was not found", HTTPStatus.NOT_FOUND)
 
         # Lock this member's row until the transaction ends, so two purchases for the
         # same member run one after the other and the second sees the first membership.
         await session.execute(select(User.id).where(User.id == user_id).with_for_update())
         today = datetime.now(UTC).date()
         if await self.has_pending_membership(session, user_id):
-            raise AppError("you already have a payment awaiting completion", 409)
+            raise AppError("you already have a payment awaiting completion", HTTPStatus.CONFLICT)
         if await self.has_active_membership(session, user_id, today):
-            raise AppError("you already have an active membership", 409)
+            raise AppError("you already have an active membership", HTTPStatus.CONFLICT)
 
         payment = await self.payment_gateway.create_checkout(
             plan.price_minor, plan.currency, plan_name=plan.name
         )
         if payment.status == PaymentStatus.DECLINED:
-            raise AppError("payment was declined", 402)
+            raise AppError("payment was declined", HTTPStatus.PAYMENT_REQUIRED)
         if payment.status != PaymentStatus.PENDING:
-            raise AppError("payment could not be started", 402)
+            raise AppError("payment could not be started", HTTPStatus.PAYMENT_REQUIRED)
 
         membership = Membership(
             user_id=user_id,
@@ -213,10 +308,12 @@ class MembershipService:
         await session.flush()
         return PurchaseResult(membership=membership, plan=plan, payment=payment)
 
-    async def latest_membership(self, session: AsyncSession, user_id: UUID) -> Membership | None:
+    async def latest_membership(
+        self, session: AsyncSession, user_id: UUID, statuses: tuple[MembershipStatus, ...]
+    ) -> Membership | None:
         statement = (
             select(Membership)
-            .where(Membership.user_id == user_id)
+            .where(Membership.user_id == user_id, Membership.status.in_(statuses))
             .options(selectinload(Membership.plan))
             .order_by(Membership.id.desc())
             .limit(1)
@@ -226,12 +323,24 @@ class MembershipService:
     async def cancel(
         self, session: AsyncSession, pending_notifications: list, user_id: UUID
     ) -> Membership:
-        """Cancel the member's latest membership, if its current state allows it."""
+        """Cancel the member's currently active membership."""
         await self.lock_member(session, user_id)
-        membership = await self.latest_membership(session, user_id)
+        today = datetime.now(UTC).date()
+        membership = await session.scalar(
+            select(Membership)
+            .where(
+                Membership.user_id == user_id,
+                Membership.status == MembershipStatus.ACTIVE,
+                Membership.starts_on <= today,
+                Membership.ends_on >= today,
+            )
+            .options(selectinload(Membership.plan))
+            .order_by(Membership.id.desc())
+            .limit(1)
+        )
         if membership is None:
-            raise AppError("you do not have a membership", 404)
-        state_of(membership, datetime.now(UTC).date()).cancel(membership)
+            raise AppError("you do not have an active membership", HTTPStatus.NOT_FOUND)
+        state_of(membership, today).cancel(membership)
         await self._record(
             session,
             pending_notifications,
@@ -250,27 +359,31 @@ class MembershipService:
         The new dates are worked out first and only applied once payment succeeds.
         """
         if self.payment_gateway is None:
-            raise AppError("payment gateway is not configured", 500)
+            raise AppError("payment gateway is not configured", HTTPStatus.INTERNAL_SERVER_ERROR)
 
         await self.lock_member(session, user_id)
         today = datetime.now(UTC).date()
         if await self.has_pending_membership(session, user_id):
-            raise AppError("you already have a payment awaiting completion", 409)
-        membership = await self.latest_membership(session, user_id)
+            raise AppError("you already have a payment awaiting completion", HTTPStatus.CONFLICT)
+        membership = await self.latest_membership(
+            session, user_id, (MembershipStatus.ACTIVE, MembershipStatus.EXPIRED)
+        )
         if membership is None:
-            raise AppError("you do not have a membership to renew", 404)
+            raise AppError("you do not have a membership to renew", HTTPStatus.NOT_FOUND)
         plan = membership.plan
         if not plan.is_active or plan.price_minor <= 0:
-            raise AppError("this plan is no longer on sale, please choose another", 404)
+            raise AppError(
+                "this plan is no longer on sale, please choose another", HTTPStatus.NOT_FOUND
+            )
         terms = state_of(membership, today).renewal_terms(membership, plan.duration_days, today)
 
         payment = await self.payment_gateway.create_checkout(
             plan.price_minor, plan.currency, plan_name=plan.name
         )
         if payment.status == PaymentStatus.DECLINED:
-            raise AppError("payment was declined", 402)
+            raise AppError("payment was declined", HTTPStatus.PAYMENT_REQUIRED)
         if payment.status != PaymentStatus.PENDING:
-            raise AppError("payment could not be started", 402)
+            raise AppError("payment could not be started", HTTPStatus.PAYMENT_REQUIRED)
 
         # Do not change the current membership while Checkout is outstanding.
         # On a successful webhook, this row becomes active and its precomputed
@@ -286,18 +399,6 @@ class MembershipService:
         )
         session.add(membership)
         await session.flush()
-        await self._record(
-            session,
-            pending_notifications,
-            user_id,
-            NotificationType.MEMBERSHIP_RENEWED,
-            {
-                "membership_id": membership.id,
-                "starts_on": membership.starts_on.isoformat(),
-                "ends_on": membership.ends_on.isoformat(),
-                "status": membership.status.value,
-            },
-        )
         return PurchaseResult(membership=membership, plan=plan, payment=payment)
 
     async def _record(

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from http import HTTPStatus
 from uuid import UUID
 
 from sqlalchemy import select
@@ -31,13 +32,15 @@ class AuthService:
     ) -> User:
         normalized_email = normalize_email(email)
         if len(password) < MIN_PASSWORD_LENGTH:
-            raise AppError("password does not meet the minimum length", 422)
+            raise AppError(
+                "password does not meet the minimum length", HTTPStatus.UNPROCESSABLE_ENTITY
+            )
         name = name.strip()
         if not name:
-            raise AppError("name is required", 422)
+            raise AppError("name is required", HTTPStatus.UNPROCESSABLE_ENTITY)
         existing_user = await session.scalar(select(User).where(User.email == normalized_email))
         if existing_user is not None:
-            raise AppError("email is already registered", 409)
+            raise AppError("email is already registered", HTTPStatus.CONFLICT)
         user = User(
             email=normalized_email, password_hash=hash_password(password), role=UserRole.MEMBER
         )
@@ -47,7 +50,7 @@ class AuthService:
             await session.flush()
         except IntegrityError as error:
             # The database constraint closes the race between the earlier lookup and insert.
-            raise AppError("email is already registered", 409) from error
+            raise AppError("email is already registered", HTTPStatus.CONFLICT) from error
         return user
 
     async def get_user_by_id(self, session: AsyncSession, user_id: str | UUID) -> User | None:
@@ -59,16 +62,19 @@ class AuthService:
     async def login(self, session: AsyncSession, email: str, password: str) -> TokenPair:
         user = await session.scalar(select(User).where(User.email == normalize_email(email)))
         if user is None or not user.is_active or not verify_password(password, user.password_hash):
-            raise AppError("invalid email or password", 401)
+            raise AppError("invalid email or password", HTTPStatus.UNAUTHORIZED)
         return await self._issue_tokens(session, user)
 
     async def rotate_refresh_token(self, session: AsyncSession, refresh_token: str) -> TokenPair:
-        payload = decode_token(refresh_token, "refresh")
+        try:
+            payload = decode_token(refresh_token, "refresh")
+        except ValueError as error:
+            raise AppError("invalid refresh token", HTTPStatus.UNAUTHORIZED) from error
         try:
             jti = payload["jti"]
             user_id = UUID(payload["sub"])
         except (KeyError, ValueError) as error:
-            raise AppError("invalid refresh token", 401) from error
+            raise AppError("invalid refresh token", HTTPStatus.UNAUTHORIZED) from error
         token_record = await session.scalar(
             select(RefreshToken).where(RefreshToken.jti == jti).with_for_update()
         )
@@ -77,12 +83,12 @@ class AuthService:
             or token_record.revoked_at is not None
             or token_record.expires_at <= utc_now()
         ):
-            raise AppError("refresh token is no longer valid", 401)
+            raise AppError("refresh token is no longer valid", HTTPStatus.UNAUTHORIZED)
         if token_record.user_id != user_id:
-            raise AppError("refresh token is no longer valid", 401)
+            raise AppError("refresh token is no longer valid", HTTPStatus.UNAUTHORIZED)
         user = await session.get(User, user_id)
         if user is None or not user.is_active:
-            raise AppError("user is not active", 401)
+            raise AppError("user is not active", HTTPStatus.UNAUTHORIZED)
         token_record.revoked_at = utc_now()
         return await self._issue_tokens(session, user, token_record.family_id)
 

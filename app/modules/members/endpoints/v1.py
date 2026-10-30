@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, UploadFile, status
 from app.core.dependencies import DbSessionDep
 from app.core.exceptions import AppError, http_error
 from app.modules.auth.dependencies import CurrentUser
-from app.modules.members.dependencies import MemberServiceDependency
+from app.modules.members.dependencies import MemberServiceDep
 from app.modules.members.schemas import BiometricImageResponse
 
 router = APIRouter(prefix="/members", tags=["members"])
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/members", tags=["members"])
 async def upload_biometric_image(
     current_user: CurrentUser,
     session: DbSessionDep,
-    service: MemberServiceDependency,
+    service: MemberServiceDep,
     image: Annotated[UploadFile, File()],
 ) -> Any:
     try:

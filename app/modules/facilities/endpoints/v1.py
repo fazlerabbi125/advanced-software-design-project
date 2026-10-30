@@ -7,8 +7,8 @@ from app.core.exceptions import AppError, http_error
 from app.models.facilities import FaultStatus
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.facilities.dependencies import (
-    FacilitiesServiceDependency,
-    OutageHandlerDependency,
+    FacilitiesServiceDep,
+    OutageHandlerDep,
     StaffUser,
 )
 from app.modules.facilities.schemas import (
@@ -19,18 +19,23 @@ from app.modules.facilities.schemas import (
     ReportFaultRequest,
 )
 from app.shared.helpers import utc_now
+from app.shared.pagination import PageParamsDep, PageResponse
 
 router = APIRouter(prefix="/equipment", tags=["equipment"])
 
 
-@router.get("", response_model=list[EquipmentUnitResponse], description="List equipment units.")
+@router.get(
+    "", response_model=PageResponse[EquipmentUnitResponse], description="List equipment units."
+)
 async def list_units(
     _: CurrentUser,
     session: DbSessionDep,
-    service: FacilitiesServiceDependency,
+    service: FacilitiesServiceDep,
+    params: PageParamsDep,
     equipment_type: str | None = None,
 ) -> Any:
-    return await service.list_units(session, equipment_type)
+    result = await service.list_units(session, params, equipment_type)
+    return {"items": result.items, "meta": result.meta}
 
 
 @router.post(
@@ -43,7 +48,7 @@ async def register_unit(
     payload: RegisterUnitRequest,
     _: StaffUser,
     session: DbSessionDep,
-    service: FacilitiesServiceDependency,
+    service: FacilitiesServiceDep,
 ) -> Any:
     try:
         unit = await service.register_unit(
@@ -70,7 +75,7 @@ async def report_fault(
     payload: ReportFaultRequest,
     current_user: CurrentUser,
     session: DbSessionDep,
-    service: FacilitiesServiceDependency,
+    service: FacilitiesServiceDep,
 ) -> Any:
     try:
         fault = await service.report_fault(session, unit_id, current_user.id, payload.description)
@@ -85,15 +90,19 @@ async def report_fault(
 
 
 @router.get(
-    "/faults", response_model=list[FaultResponse], description="List reported equipment faults."
+    "/faults",
+    response_model=PageResponse[FaultResponse],
+    description="List reported equipment faults.",
 )
 async def list_faults(
     _: StaffUser,
     session: DbSessionDep,
-    service: FacilitiesServiceDependency,
+    service: FacilitiesServiceDep,
+    params: PageParamsDep,
     fault_status: Annotated[FaultStatus | None, Query(alias="status")] = None,
 ) -> Any:
-    return await service.list_faults(session, fault_status)
+    result = await service.list_faults(session, params, fault_status)
+    return {"items": result.items, "meta": result.meta}
 
 
 @router.post(
@@ -105,8 +114,8 @@ async def confirm_fault(
     fault_id: int,
     staff: StaffUser,
     session: DbSessionDep,
-    service: FacilitiesServiceDependency,
-    outages: OutageHandlerDependency,
+    service: FacilitiesServiceDep,
+    outages: OutageHandlerDep,
 ) -> Any:
     now = utc_now()
     try:
@@ -132,7 +141,7 @@ async def confirm_fault(
     description="Dismiss a reported equipment fault.",
 )
 async def dismiss_fault(
-    fault_id: int, staff: StaffUser, session: DbSessionDep, service: FacilitiesServiceDependency
+    fault_id: int, staff: StaffUser, session: DbSessionDep, service: FacilitiesServiceDep
 ) -> Any:
     try:
         fault = await service.dismiss_fault(session, fault_id, staff.id)
@@ -152,7 +161,7 @@ async def dismiss_fault(
     description="Resolve a confirmed equipment fault.",
 )
 async def resolve_fault(
-    fault_id: int, staff: StaffUser, session: DbSessionDep, service: FacilitiesServiceDependency
+    fault_id: int, staff: StaffUser, session: DbSessionDep, service: FacilitiesServiceDep
 ) -> Any:
     try:
         fault = await service.resolve_fault(session, fault_id, staff.id)
