@@ -7,6 +7,7 @@ BFS_TEST_DATABASE_URL=postgresql+asyncpg://... uv run python -m unittest discove
 import os
 import unittest
 from datetime import timedelta
+from http import HTTPStatus
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -211,8 +212,9 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
         # An accepted offer cannot be used twice, and nobody else can take Ben's offer.
         with self.assertRaises(AppError):
             await self.accept(self.ben, self.ben_entry.id)
-        with self.assertRaises(LookupError):
+        with self.assertRaises(AppError) as raised:
             await self.accept(self.cat, self.ben_entry.id)
+        self.assertEqual(raised.exception.status_code, HTTPStatus.NOT_FOUND)
 
     async def test_lapsed_offer_passes_to_the_next_member_then_frees_the_place(self):
         session_id = await self.full_class_with_waitlist()

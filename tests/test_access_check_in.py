@@ -5,7 +5,7 @@ import app.models  # noqa: F401  (registers every model so User can be created)
 from app.core.exceptions import AppError
 from app.models.access import AccessEvent, AccessZone
 from app.models.auth import User
-from app.modules.access.service import AccessService
+from app.modules.access.access_service import AccessService
 
 
 class CheckInAccountTests(unittest.IsolatedAsyncioTestCase):

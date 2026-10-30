@@ -11,23 +11,23 @@ from fastapi.testclient import TestClient
 from app.core.exceptions import AppError
 from app.models.access import AccessEvent, AccessLog, AccessZone, DeniedAccessReason
 from app.models.members import MemberProfile
-from app.modules.access.biometric_service import (
-    BiometricAccessService,
-    ScannerDevice,
+from app.modules.access.access_service import CheckInResult
+from app.modules.access.scanner_service import (
+    AuthenticatedScanner,
+    ScannerCheckInService,
 )
 from app.modules.access.schemas import DeviceCheckInRequest
-from app.modules.access.service import CheckInResult
 from tests.settings import TEST_ENVIRONMENT
 
 
-class BiometricAccessServiceTests(unittest.IsolatedAsyncioTestCase):
+class ScannerCheckInServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.session = MagicMock()
         self.session.scalar = AsyncMock()
         self.access = MagicMock()
         self.access.check_in = AsyncMock()
-        self.service = BiometricAccessService(self.access)
-        self.scanner = ScannerDevice(AccessZone.VIP_SAUNA, "a" * 64)
+        self.service = ScannerCheckInService(self.access)
+        self.scanner = AuthenticatedScanner(AccessZone.VIP_SAUNA, "a" * 64)
         self.template_id = uuid4()
         self.settings = SimpleNamespace(biometric_min_confidence=0.80)
 
@@ -44,7 +44,7 @@ class BiometricAccessServiceTests(unittest.IsolatedAsyncioTestCase):
         expected = MagicMock(spec=CheckInResult)
         self.access.check_in.return_value = expected
 
-        with patch("app.modules.access.biometric_service.get_settings", return_value=self.settings):
+        with patch("app.modules.access.scanner_service.get_settings", return_value=self.settings):
             result = await self.service.check_in(self.session, self.payload(), self.scanner)
 
         self.assertIs(result, expected)
@@ -58,7 +58,7 @@ class BiometricAccessServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_template_is_audited_without_enumerating_profiles(self) -> None:
         self.session.scalar.return_value = None
 
-        with patch("app.modules.access.biometric_service.get_settings", return_value=self.settings):
+        with patch("app.modules.access.scanner_service.get_settings", return_value=self.settings):
             with self.assertRaisesRegex(AppError, "unknown biometric template"):
                 await self.service.check_in(self.session, self.payload(), self.scanner)
 
@@ -70,7 +70,7 @@ class BiometricAccessServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attempt.biometric_template_id, self.template_id)
 
     async def test_low_confidence_is_audited_before_profile_lookup(self) -> None:
-        with patch("app.modules.access.biometric_service.get_settings", return_value=self.settings):
+        with patch("app.modules.access.scanner_service.get_settings", return_value=self.settings):
             with self.assertRaisesRegex(AppError, "confidence is too low"):
                 await self.service.check_in(self.session, self.payload(0.79), self.scanner)
 
@@ -89,7 +89,7 @@ class BiometricAccessServiceTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(error=type(error).__name__):
                 self.access.check_in.side_effect = error
                 with patch(
-                    "app.modules.access.biometric_service.get_settings", return_value=self.settings
+                    "app.modules.access.scanner_service.get_settings", return_value=self.settings
                 ):
                     with self.assertRaises(AppError) as raised:
                         await self.service.check_in(self.session, self.payload(), self.scanner)
@@ -102,8 +102,8 @@ class DeviceCheckInApiTests(unittest.TestCase):
         with patch.dict(os.environ, TEST_ENVIRONMENT):
             from app.core.database import get_db_session
             from app.modules.access.dependencies import (
-                get_biometric_access_service,
-                get_scanner_device,
+                get_authenticated_scanner,
+                get_scanner_check_in_service,
             )
             from app.modules.access.endpoints.v1 import router
 
@@ -113,12 +113,12 @@ class DeviceCheckInApiTests(unittest.TestCase):
         self.service = MagicMock()
         self.service.check_in = AsyncMock()
         self.template_id = uuid4()
-        self.scanner = ScannerDevice(AccessZone.VIP_SAUNA, "a" * 64)
+        self.scanner = AuthenticatedScanner(AccessZone.VIP_SAUNA, "a" * 64)
         app = FastAPI()
         app.include_router(router)
         app.dependency_overrides[get_db_session] = lambda: self.session
-        app.dependency_overrides[get_biometric_access_service] = lambda: self.service
-        app.dependency_overrides[get_scanner_device] = lambda: self.scanner
+        app.dependency_overrides[get_scanner_check_in_service] = lambda: self.service
+        app.dependency_overrides[get_authenticated_scanner] = lambda: self.scanner
         self.client = TestClient(app)
 
     def request(self, confidence: float = 0.92):

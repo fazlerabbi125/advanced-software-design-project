@@ -13,4 +13,6 @@ TEST_ENVIRONMENT = {
     "UPLOAD_ROOT": "/tmp/bfs-test-unused",
     "STRIPE_SECRET_KEY": "sk_test_unused",
     "STRIPE_WEBHOOK_SECRET": "whsec_unused",
+    "STRIPE_SUCCESS_URL": "https://example.test/checkout/success",
+    "STRIPE_CANCEL_URL": "https://example.test/checkout/cancel",
 }

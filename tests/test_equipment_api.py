@@ -10,6 +10,7 @@ from app.core.exceptions import AppError
 from app.models.auth import User, UserRole
 from app.models.facilities import EquipmentFault, EquipmentUnit, FaultStatus
 from app.modules.bookings.outages import CancelledBooking, MovedSlot, OutageOutcome
+from app.shared.pagination import PageMeta, PageResult
 from tests.settings import TEST_ENVIRONMENT
 from tests.test_booking_eligibility import NOW
 
@@ -70,7 +71,9 @@ class EquipmentApiTests(unittest.TestCase):
     def test_members_report_faults_but_cannot_manage_them(self):
         self.current_user = User(id=MEMBER_ID, role=UserRole.MEMBER)
         self.service.report_fault.return_value = fault()
-        self.service.list_units.return_value = [unit()]
+        self.service.list_units.return_value = PageResult(
+            [unit()], PageMeta(page=1, limit=20, total_pages=1, total_count=1)
+        )
 
         report = self.client.post(
             "/equipment/2/faults", json={"description": "  The safety catch is bent "}
@@ -79,7 +82,7 @@ class EquipmentApiTests(unittest.TestCase):
         self.service.report_fault.assert_awaited_once_with(
             ANY, 2, MEMBER_ID, "The safety catch is bent"
         )
-        self.assertEqual(self.client.get("/equipment").json()[0]["name"], "Squat Rack 2")
+        self.assertEqual(self.client.get("/equipment").json()["items"][0]["name"], "Squat Rack 2")
 
         staff_only = (
             self.client.post("/equipment", json={"name": "Rack 9", "equipment_type": "squat rack"}),
@@ -91,10 +94,12 @@ class EquipmentApiTests(unittest.TestCase):
         self.assertEqual([item.status_code for item in staff_only], [403] * 5)
 
     def test_staff_filter_faults_by_status(self):
-        self.service.list_faults.return_value = [fault()]
+        self.service.list_faults.return_value = PageResult(
+            [fault()], PageMeta(page=1, limit=20, total_pages=1, total_count=1)
+        )
         response = self.client.get("/equipment/faults?status=reported")
         self.assertEqual(response.status_code, 200)
-        self.service.list_faults.assert_awaited_once_with(ANY, FaultStatus.REPORTED)
+        self.service.list_faults.assert_awaited_once_with(ANY, ANY, FaultStatus.REPORTED)
         self.assertEqual(self.client.get("/equipment/faults?status=broken").status_code, 422)
 
     def test_report_validation_and_unknown_unit(self):

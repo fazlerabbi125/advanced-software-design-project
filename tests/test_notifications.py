@@ -78,6 +78,7 @@ class NotificationFeedTests(unittest.IsolatedAsyncioTestCase):
         redis = MagicMock()
         redis.pubsub.return_value = pubsub
         session = MagicMock()
+        session.rollback = AsyncMock()
         feed = NotificationFeed(redis)
         feed.unread_for_user = AsyncMock(return_value=[unread])
         disconnected = AsyncMock(side_effect=[False, True])
@@ -93,6 +94,7 @@ class NotificationFeedTests(unittest.IsolatedAsyncioTestCase):
         pubsub.subscribe.assert_awaited_once_with(f"notify:user:{unread.user_id}")
         pubsub.unsubscribe.assert_awaited_once_with(f"notify:user:{unread.user_id}")
         pubsub.aclose.assert_awaited_once()
+        session.rollback.assert_awaited_once()
 
 
 if __name__ == "__main__":

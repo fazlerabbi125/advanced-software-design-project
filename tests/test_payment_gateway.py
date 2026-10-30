@@ -44,6 +44,25 @@ class StripeCheckoutGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(params["line_items"][0]["price_data"]["currency"], "gbp")
         self.assertNotIn("payment_method_types", params)
 
+    async def test_omits_cancel_url_when_not_configured(self) -> None:
+        create_session = AsyncMock(
+            return_value=SimpleNamespace(
+                id="cs_test_123", url="https://checkout.stripe.test/cs_test_123"
+            )
+        )
+        gateway = object.__new__(StripeCheckoutGateway)
+        gateway._client = SimpleNamespace(
+            v1=SimpleNamespace(
+                checkout=SimpleNamespace(sessions=SimpleNamespace(create_async=create_session))
+            )
+        )
+        gateway._success_url = "https://example.test/success"
+        gateway._cancel_url = None
+
+        await gateway.create_checkout(4500, "GBP", plan_name="Premium")
+
+        self.assertNotIn("cancel_url", create_session.await_args.kwargs["params"])
+
     @unittest.skipUnless(
         os.getenv("BFS_STRIPE_INTEGRATION_TEST") == "1",
         "set BFS_STRIPE_INTEGRATION_TEST=1 to create a Stripe sandbox Checkout Session",

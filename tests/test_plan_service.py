@@ -26,6 +26,7 @@ from app.models import (
 )
 from app.modules.bookings.service import BookingService
 from app.modules.memberships.service import MembershipService
+from app.shared.pagination import PageParams
 from tests.test_booking_eligibility import NOW
 
 CLASS = MembershipEntitlement.CLASS_BOOKING
@@ -86,7 +87,12 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((plan.booking_window_days, plan.weekly_booking_limit), (2, 4))
         self.assertEqual(await self.entitlements_of(plan.id), {GYM, CLASS})
         async with self.sessions() as session:
-            names = [item.name for item in await MembershipService().list_plans(session)]
+            names = [
+                item.name
+                for item in (
+                    await MembershipService().list_plans(session, PageParams(page=1, limit=20))
+                ).items
+            ]
         self.assertIn("Student", names)
 
     async def test_plan_names_are_unique_ignoring_case(self):
@@ -130,8 +136,16 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
             service = MembershipService()
             await service.deactivate_plan(session, self.standard.id)
             await session.commit()
-            on_sale = [plan.id for plan in await service.list_plans(session)]
-            everything = {plan.id: plan.is_active for plan in await service.list_all_plans(session)}
+            on_sale = [
+                plan.id
+                for plan in (await service.list_plans(session, PageParams(page=1, limit=20))).items
+            ]
+            everything = {
+                plan.id: plan.is_active
+                for plan in (
+                    await service.list_all_plans(session, PageParams(page=1, limit=20))
+                ).items
+            }
         self.assertNotIn(self.standard.id, on_sale)
         self.assertEqual(everything[self.standard.id], False)
 
