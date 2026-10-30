@@ -25,6 +25,7 @@ class TimestampMixin:
         nullable=False,
     )
 
+
 ASYNC_CASCADE = "save-update, merge, expunge, delete, delete-orphan"
 
 

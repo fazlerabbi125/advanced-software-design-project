@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.bookings import BookingResourceType
+from app.shared.constants import EQUIPMENT_SLOT_CAPACITY
 
 
 def check_time_range(starts_at: datetime, ends_at: datetime) -> None:
@@ -22,13 +23,18 @@ class CreateSessionRequest(BaseModel):
     station_count: int | None = Field(default=None, gt=0)
     equipment_unit_id: int | None = Field(default=None, gt=0)
 
+    @field_validator("resource_name", mode="before")
+    @classmethod
+    def normalize_resource_name(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
     @model_validator(mode="after")
     def check_times(self) -> "CreateSessionRequest":
         check_time_range(self.starts_at, self.ends_at)
         is_equipment = self.resource_type == BookingResourceType.EQUIPMENT
         if is_equipment != (self.equipment_unit_id is not None):
             raise ValueError("equipment slots, and only equipment slots, need an equipment_unit_id")
-        if is_equipment and self.capacity != 1:
+        if is_equipment and self.capacity != EQUIPMENT_SLOT_CAPACITY:
             raise ValueError("an equipment slot is for one member, so capacity must be 1")
         return self
 

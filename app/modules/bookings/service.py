@@ -1,11 +1,13 @@
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+from http import HTTPStatus
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.exceptions import AppError
 from app.models.auth import User
 from app.models.bookings import (
     Booking,
@@ -19,8 +21,9 @@ from app.models.notifications import NotificationType
 from app.models.timetable_sessions import TimetableSession
 from app.modules.bookings.builder import BookingContextBuilder
 from app.modules.bookings.eligibility import (
+    DEFAULT_RULES,
     BookingContext,
-    BookingEligibilityError,
+    FutureSessionRule,
     build_eligibility_chain,
 )
 from app.modules.memberships.service import MembershipService
@@ -32,31 +35,13 @@ from app.shared.constants import (
     WAITLIST_OFFER_MINUTES,
 )
 from app.shared.helpers import utc_now
-
-
-class SessionNotFoundError(LookupError):
-    pass
-
-
-class BookingNotFoundError(LookupError):
-    pass
-
-
-class BookingStateError(ValueError):
-    pass
-
-
-class WaitlistEntryNotFoundError(LookupError):
-    pass
-
-
-class SessionFullError(Exception):
-    """The session has no free places; the member was put on its waiting list."""
-
-    def __init__(self, position: int) -> None:
-        self.position = position
-        self.commit_required = True
-        super().__init__(f"this session is full, you are number {position} on the waiting list")
+from app.shared.pagination import (
+    CursorDirection,
+    CursorMeta,
+    CursorParams,
+    CursorResult,
+    encode_cursor,
+)
 
 
 def offer_deadline(offered_at: datetime, timetable_session: TimetableSession) -> datetime:
@@ -115,58 +100,70 @@ def _same_slot(bookings: Sequence[Booking], timetable_session: TimetableSession)
 class BookingService:
     def __init__(
         self,
-        session: AsyncSession,
         memberships: MembershipService,
         notifications: NotificationObserver | None = None,
     ) -> None:
-        self.session = session
         self.memberships = memberships
         self.notifications = notifications
 
-    async def create(self, user_id: UUID, timetable_session_id: int) -> Booking:
-        timetable_session = await self._lock_session(timetable_session_id)
-        await self._ensure_unit_in_service(timetable_session)
-        await self._lock_member(user_id)
-        context = await self._build_context(user_id, timetable_session)
+    async def create(
+        self,
+        session: AsyncSession,
+        pending_notifications: list,
+        user_id: UUID,
+        timetable_session_id: int,
+    ) -> Booking:
+        timetable_session = await self._lock_session(session, timetable_session_id)
+        await self._ensure_unit_in_service(session, timetable_session)
+        await self._lock_member(session, user_id)
+        context = await self._build_context(session, user_id, timetable_session)
         await self._ensure_eligible(context)
         # Only eligible members reach the waiting list.
         if timetable_session.is_full:
-            raise SessionFullError(await self._join_session_waitlist(user_id, timetable_session_id))
-        booking = await self._booking_row(user_id, timetable_session, context.bookings)
+            position = await self._join_session_waitlist(session, user_id, timetable_session_id)
+            raise AppError(
+                f"this session is full, you are number {position} on the waiting list",
+                HTTPStatus.CONFLICT,
+                {"commit_required": True, "position": position},
+            )
+        booking = await self._booking_row(session, user_id, timetable_session, context.bookings)
         self._confirm(booking, timetable_session)
-        await self._record_booking(booking, NotificationType.BOOKING_CONFIRMED)
+        await self._record_booking(
+            session, pending_notifications, booking, NotificationType.BOOKING_CONFIRMED
+        )
         return booking
 
-    async def _lock_session(self, session_id: int) -> TimetableSession:
+    async def _lock_session(self, session: AsyncSession, session_id: int) -> TimetableSession:
         """Lock the timetable session so two members cannot take the last place together."""
-        timetable_session = await self.session.scalar(
+        timetable_session = await session.scalar(
             select(TimetableSession).where(TimetableSession.id == session_id).with_for_update()
         )
         if timetable_session is None:
-            raise SessionNotFoundError("session was not found")
+            raise AppError("session was not found", HTTPStatus.NOT_FOUND)
         return timetable_session
 
-    async def _ensure_unit_in_service(self, timetable_session: TimetableSession) -> None:
+    async def _ensure_unit_in_service(
+        self, session: AsyncSession, timetable_session: TimetableSession
+    ) -> None:
         """An equipment slot whose unit is out of service cannot be booked until repaired."""
         if timetable_session.equipment_unit_id is None:
             return
-        in_service = await self.session.scalar(
+        in_service = await session.scalar(
             select(EquipmentUnit.in_service).where(
                 EquipmentUnit.id == timetable_session.equipment_unit_id
             )
         )
         if not in_service:
-            await self.session.rollback()
-            raise BookingStateError("this equipment is out of service")
+            raise AppError("this equipment is out of service", HTTPStatus.CONFLICT)
 
-    async def _lock_member(self, user_id: UUID) -> None:
+    async def _lock_member(self, session: AsyncSession, user_id: UUID) -> None:
         """Serialize this member's eligibility check and write, including membership changes."""
-        await self.session.execute(select(User.id).where(User.id == user_id).with_for_update())
+        await session.execute(select(User.id).where(User.id == user_id).with_for_update())
 
     async def _build_context(
-        self, user_id: UUID, timetable_session: TimetableSession
+        self, session: AsyncSession, user_id: UUID, timetable_session: TimetableSession
     ) -> BookingContext:
-        builder = BookingContextBuilder(self.session, user_id, utc_now())
+        builder = BookingContextBuilder(session, user_id, utc_now())
         builder.with_session(timetable_session)
         await builder.with_membership(self.memberships)
         await builder.with_weekly_bookings()
@@ -177,10 +174,18 @@ class BookingService:
     async def _ensure_eligible(self, context: BookingContext) -> None:
         failures = build_eligibility_chain().handle(context)
         if failures:
-            raise BookingEligibilityError(failures)
+            raise AppError(
+                "booking eligibility failed",
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                failures,
+            )
 
     async def _booking_row(
-        self, user_id: UUID, timetable_session: TimetableSession, bookings: Sequence[Booking]
+        self,
+        session: AsyncSession,
+        user_id: UUID,
+        timetable_session: TimetableSession,
+        bookings: Sequence[Booking],
     ) -> Booking:
         """Return the member's cancelled row for this slot to reuse, or a new row.
 
@@ -190,10 +195,10 @@ class BookingService:
         existing = _same_slot(bookings, timetable_session)
         if existing is None:
             booking = Booking(user_id=user_id)
-            self.session.add(booking)
+            session.add(booking)
             return booking
         if existing.status != BookingStatus.CANCELLED:
-            raise BookingStateError("you already have a booking for this session")
+            raise AppError("you already have a booking for this session", HTTPStatus.CONFLICT)
         return existing
 
     @staticmethod
@@ -208,7 +213,12 @@ class BookingService:
         timetable_session.allocated_count += 1
 
     async def release_places(
-        self, timetable_session: TimetableSession, count: int, now: datetime
+        self,
+        session: AsyncSession,
+        pending_notifications: list,
+        timetable_session: TimetableSession,
+        count: int,
+        now: datetime,
     ) -> None:
         """Give back places on a locked session and offer each to the next waiting member.
 
@@ -217,17 +227,24 @@ class BookingService:
         """
         timetable_session.allocated_count = max(timetable_session.allocated_count - count, 0)
         for _ in range(count):
-            if await self._offer_next_place(timetable_session, now) is None:
+            if (
+                await self._offer_next_place(session, pending_notifications, timetable_session, now)
+                is None
+            ):
                 break
 
     async def _offer_next_place(
-        self, timetable_session: TimetableSession, now: datetime
+        self,
+        session: AsyncSession,
+        pending_notifications: list,
+        timetable_session: TimetableSession,
+        now: datetime,
     ) -> WaitlistEntry | None:
         if timetable_session.is_full:
             return None
         if offer_deadline(now, timetable_session) <= now:
             return None  # Too late for anyone to take up an offer.
-        entry = await self.session.scalar(
+        entry = await session.scalar(
             select(WaitlistEntry)
             .where(
                 WaitlistEntry.session_id == timetable_session.id,
@@ -242,8 +259,10 @@ class BookingService:
         entry.status = WaitlistStatus.OFFERED
         entry.offered_at = now
         timetable_session.allocated_count += 1
-        await self.session.flush()
+        await session.flush()
         await self._record(
+            session,
+            pending_notifications,
             entry.user_id,
             NotificationType.WAITLIST_OFFER_CREATED,
             {
@@ -256,22 +275,24 @@ class BookingService:
         )
         return entry
 
-    async def accept_offer(self, user_id: UUID, entry_id: int) -> Booking:
+    async def accept_offer(
+        self, session: AsyncSession, pending_notifications: list, user_id: UUID, entry_id: int
+    ) -> Booking:
         """Turn the member's open waitlist offer into a confirmed booking.
 
         Eligibility is checked again. If the member no longer qualifies, the offer ends,
         the place goes to the next waiting member and the reasons are raised.
         """
-        session_id = await self.session.scalar(
+        session_id = await session.scalar(
             select(WaitlistEntry.session_id).where(
                 WaitlistEntry.id == entry_id, WaitlistEntry.user_id == user_id
             )
         )
         if session_id is None:
-            raise WaitlistEntryNotFoundError("waitlist entry was not found")
+            raise AppError("waitlist entry was not found", HTTPStatus.NOT_FOUND)
         # Lock the session before the entry, in the same order as the other writers.
-        timetable_session = await self._lock_session(session_id)
-        entry = await self.session.scalar(
+        timetable_session = await self._lock_session(session, session_id)
+        entry = await session.scalar(
             select(WaitlistEntry)
             .where(WaitlistEntry.id == entry_id)
             .with_for_update()
@@ -283,38 +304,85 @@ class BookingService:
             or entry.offered_at is None
             or offer_deadline(entry.offered_at, timetable_session) <= now
         ):
-            raise BookingStateError("there is no open offer on this waitlist entry")
-        await self._lock_member(user_id)
-        context = await self._build_context(user_id, timetable_session)
-        failures = build_eligibility_chain().handle(context)
+            raise AppError("there is no open offer on this waitlist entry", HTTPStatus.CONFLICT)
+        await self._lock_member(session, user_id)
+        context = await self._build_context(session, user_id, timetable_session)
+        rules = tuple(rule for rule in DEFAULT_RULES if rule is not FutureSessionRule)
+        failures = build_eligibility_chain(rules).handle(context)
         if failures:
             entry.status = WaitlistStatus.EXPIRED
-            await self.release_places(timetable_session, 1, now)
-            error = BookingEligibilityError(failures)
-            error.commit_required = True
-            raise error
+            await self.release_places(session, pending_notifications, timetable_session, 1, now)
+            raise AppError(
+                "booking eligibility failed",
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                {
+                    "commit_required": True,
+                    "failures": failures,
+                },
+            )
 
-        booking = await self._booking_row(user_id, timetable_session, context.bookings)
+        booking = await self._booking_row(session, user_id, timetable_session, context.bookings)
         # The place was held for this member when the offer was made; hand it over
         # rather than take a second one.
         timetable_session.allocated_count -= 1
         self._confirm(booking, timetable_session)
         entry.status = WaitlistStatus.ACCEPTED
-        await self._record_booking(booking, NotificationType.BOOKING_CONFIRMED)
+        await self._record_booking(
+            session, pending_notifications, booking, NotificationType.BOOKING_CONFIRMED
+        )
         return booking
 
-    async def list_waitlist_for_user(self, user_id: UUID) -> list[WaitlistEntry]:
-        statement = (
-            select(WaitlistEntry)
-            .where(WaitlistEntry.user_id == user_id)
-            .options(selectinload(WaitlistEntry.session))
-            .order_by(WaitlistEntry.id.desc())
+    async def list_waitlist_for_user(
+        self, session: AsyncSession, user_id: UUID, params: CursorParams
+    ) -> CursorResult[WaitlistEntry]:
+        statement = select(WaitlistEntry).where(WaitlistEntry.user_id == user_id)
+        if params.values:
+            if len(params.values) != 1:
+                raise AppError("cursor is invalid", HTTPStatus.UNPROCESSABLE_ENTITY)
+            try:
+                entry_id = int(params.values[0])
+            except (TypeError, ValueError) as error:
+                raise AppError("cursor is invalid", HTTPStatus.UNPROCESSABLE_ENTITY) from error
+            if params.direction == CursorDirection.NEXT:
+                statement = statement.where(WaitlistEntry.id < entry_id).order_by(
+                    WaitlistEntry.id.desc()
+                )
+            else:
+                statement = statement.where(WaitlistEntry.id > entry_id).order_by(WaitlistEntry.id)
+        elif params.direction == CursorDirection.PREVIOUS:
+            raise AppError(
+                "cursor is required for previous navigation", HTTPStatus.UNPROCESSABLE_ENTITY
+            )
+        else:
+            statement = statement.order_by(WaitlistEntry.id.desc())
+        statement = statement.options(selectinload(WaitlistEntry.session))
+        rows = list((await session.scalars(statement.limit(params.limit + 1))).all())
+        has_more = len(rows) > params.limit
+        items = rows[: params.limit]
+        if params.direction == CursorDirection.PREVIOUS:
+            items.reverse()
+        has_next = (
+            has_more if params.direction == CursorDirection.NEXT else params.cursor is not None
         )
-        return list((await self.session.scalars(statement)).all())
+        has_previous = (
+            params.cursor is not None if params.direction == CursorDirection.NEXT else has_more
+        )
+        return CursorResult(
+            items=items,
+            meta=CursorMeta(
+                limit=params.limit,
+                next_cursor=encode_cursor(items[-1].id) if has_next and items else None,
+                previous_cursor=encode_cursor(items[0].id) if has_previous and items else None,
+                has_next=has_next,
+                has_previous=has_previous,
+            ),
+        )
 
-    async def _join_session_waitlist(self, user_id: UUID, session_id: int) -> int:
+    async def _join_session_waitlist(
+        self, session: AsyncSession, user_id: UUID, session_id: int
+    ) -> int:
         """Add the member to the session's waiting list (once) and return their position."""
-        entry = await self.session.scalar(
+        entry = await session.scalar(
             select(WaitlistEntry).where(
                 WaitlistEntry.session_id == session_id, WaitlistEntry.user_id == user_id
             )
@@ -322,16 +390,16 @@ class BookingService:
         if entry is not None and entry.status in (WaitlistStatus.EXPIRED, WaitlistStatus.ACCEPTED):
             # A member whose offer lapsed (or whose accepted place was later given up) joins
             # again at the back of the list, with a new entry.
-            await self.session.delete(entry)
-            await self.session.flush()
+            await session.delete(entry)
+            await session.flush()
             entry = None
         if entry is None:
             entry = WaitlistEntry(
                 session_id=session_id, user_id=user_id, status=WaitlistStatus.WAITING
             )
-            self.session.add(entry)
-            await self.session.flush()
-        position = await self.session.scalar(
+            session.add(entry)
+            await session.flush()
+        position = await session.scalar(
             select(func.count(WaitlistEntry.id)).where(
                 WaitlistEntry.session_id == session_id,
                 WaitlistEntry.status == WaitlistStatus.WAITING,
@@ -340,50 +408,123 @@ class BookingService:
         )
         return position or 0
 
-    async def list_for_user(self, user_id: UUID) -> list[Booking]:
-        statement = (
-            select(Booking).where(Booking.user_id == user_id).order_by(Booking.starts_at.desc())
+    async def list_for_user(
+        self, session: AsyncSession, user_id: UUID, params: CursorParams
+    ) -> CursorResult[Booking]:
+        statement = select(Booking).where(Booking.user_id == user_id)
+        if params.values:
+            if len(params.values) != 2 or not isinstance(params.values[0], str):
+                raise AppError("cursor is invalid", HTTPStatus.UNPROCESSABLE_ENTITY)
+            try:
+                starts_at = datetime.fromisoformat(params.values[0])
+                booking_id = int(params.values[1])
+            except (TypeError, ValueError) as error:
+                raise AppError("cursor is invalid", HTTPStatus.UNPROCESSABLE_ENTITY) from error
+            if params.direction == CursorDirection.NEXT:
+                statement = statement.where(
+                    (Booking.starts_at < starts_at)
+                    | ((Booking.starts_at == starts_at) & (Booking.id < booking_id))
+                ).order_by(Booking.starts_at.desc(), Booking.id.desc())
+            else:
+                statement = statement.where(
+                    (Booking.starts_at > starts_at)
+                    | ((Booking.starts_at == starts_at) & (Booking.id > booking_id))
+                ).order_by(Booking.starts_at, Booking.id)
+        elif params.direction == CursorDirection.PREVIOUS:
+            raise AppError(
+                "cursor is required for previous navigation", HTTPStatus.UNPROCESSABLE_ENTITY
+            )
+        else:
+            statement = statement.order_by(Booking.starts_at.desc(), Booking.id.desc())
+        rows = list((await session.scalars(statement.limit(params.limit + 1))).all())
+        has_more = len(rows) > params.limit
+        items = rows[: params.limit]
+        if params.direction == CursorDirection.PREVIOUS:
+            items.reverse()
+        has_next = (
+            has_more if params.direction == CursorDirection.NEXT else params.cursor is not None
         )
-        return list((await self.session.scalars(statement)).all())
+        has_previous = (
+            params.cursor is not None if params.direction == CursorDirection.NEXT else has_more
+        )
+        return CursorResult(
+            items=items,
+            meta=CursorMeta(
+                limit=params.limit,
+                next_cursor=(
+                    encode_cursor(items[-1].starts_at.isoformat(), items[-1].id)
+                    if has_next and items
+                    else None
+                ),
+                previous_cursor=(
+                    encode_cursor(items[0].starts_at.isoformat(), items[0].id)
+                    if has_previous and items
+                    else None
+                ),
+                has_next=has_next,
+                has_previous=has_previous,
+            ),
+        )
 
-    async def _locked_owned_booking(self, user_id: UUID, booking_id: int) -> Booking:
-        booking = await self.session.scalar(
+    async def _locked_owned_booking(
+        self, session: AsyncSession, user_id: UUID, booking_id: int
+    ) -> Booking:
+        booking = await session.scalar(
             select(Booking)
             .where(Booking.id == booking_id, Booking.user_id == user_id)
             .with_for_update()
         )
         if booking is None:
-            raise BookingNotFoundError("booking was not found")
+            raise AppError("booking was not found", HTTPStatus.NOT_FOUND)
         return booking
 
-    async def cancel(self, user_id: UUID, booking_id: int) -> Booking:
-        booking = await self._locked_owned_booking(user_id, booking_id)
-        if booking.status != BookingStatus.CONFIRMED:
-            message = f"a {booking.status.value} booking cannot be cancelled"
-            raise BookingStateError(message)
-        if booking.timetable_session_id is not None:
-            # Give the place back to the session.
-            timetable_session = await self.session.scalar(
+    async def cancel(
+        self, session: AsyncSession, pending_notifications: list, user_id: UUID, booking_id: int
+    ) -> Booking:
+        timetable_session_id = await session.scalar(
+            select(Booking.timetable_session_id).where(
+                Booking.id == booking_id, Booking.user_id == user_id
+            )
+        )
+        timetable_session = None
+        if timetable_session_id is not None:
+            timetable_session = await session.scalar(
                 select(TimetableSession)
-                .where(TimetableSession.id == booking.timetable_session_id)
+                .where(TimetableSession.id == timetable_session_id)
                 .with_for_update()
             )
-            if timetable_session is not None:
-                await self.release_places(timetable_session, 1, utc_now())
+        booking = await self._locked_owned_booking(session, user_id, booking_id)
+        if booking.status != BookingStatus.CONFIRMED:
+            message = f"a {booking.status.value} booking cannot be cancelled"
+            raise AppError(message, HTTPStatus.CONFLICT)
+        if timetable_session is not None:
+            await self.release_places(
+                session, pending_notifications, timetable_session, 1, utc_now()
+            )
         booking.status = BookingStatus.CANCELLED
-        await self._record_booking(booking, NotificationType.BOOKING_CANCELLED)
+        await self._record_booking(
+            session, pending_notifications, booking, NotificationType.BOOKING_CANCELLED
+        )
         return booking
 
-    async def check_in(self, user_id: UUID, booking_id: int) -> Booking:
-        booking = await self._locked_owned_booking(user_id, booking_id)
+    async def check_in(self, session: AsyncSession, user_id: UUID, booking_id: int) -> Booking:
+        booking = await self._locked_owned_booking(session, user_id, booking_id)
         problem = check_in_problem(booking, utc_now())
         if problem is not None:
-            raise BookingStateError(problem)
+            raise AppError(problem, HTTPStatus.CONFLICT)
         booking.status = BookingStatus.CHECKED_IN
         return booking
 
-    async def _record_booking(self, booking: Booking, event_type: NotificationType) -> None:
+    async def _record_booking(
+        self,
+        session: AsyncSession,
+        pending_notifications: list,
+        booking: Booking,
+        event_type: NotificationType,
+    ) -> None:
         await self._record(
+            session,
+            pending_notifications,
             booking.user_id,
             event_type,
             {
@@ -396,9 +537,16 @@ class BookingService:
         )
 
     async def _record(
-        self, user_id: UUID, event_type: NotificationType, payload: dict[str, object]
+        self,
+        session: AsyncSession,
+        pending_notifications: list,
+        user_id: UUID,
+        event_type: NotificationType,
+        payload: dict[str, object],
     ) -> None:
         if self.notifications is not None:
             await self.notifications.observe(
-                NotificationEvent(user_id=user_id, event_type=event_type, payload=payload)
+                session,
+                pending_notifications,
+                NotificationEvent(user_id=user_id, event_type=event_type, payload=payload),
             )

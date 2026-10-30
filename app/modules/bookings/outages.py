@@ -42,13 +42,12 @@ class OutageOutcome:
 
 
 class UnitOutageHandler:
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
-
-    async def handle(self, unit: EquipmentUnit, now: datetime) -> OutageOutcome:
+    async def handle(
+        self, session: AsyncSession, unit: EquipmentUnit, now: datetime
+    ) -> OutageOutcome:
         outcome = OutageOutcome()
         slots = (
-            await self.session.scalars(
+            await session.scalars(
                 select(TimetableSession)
                 .where(
                     TimetableSession.equipment_unit_id == unit.id,
@@ -61,7 +60,7 @@ class UnitOutageHandler:
         if not slots:
             return outcome
         alternatives = (
-            await self.session.scalars(
+            await session.scalars(
                 select(EquipmentUnit)
                 .where(
                     EquipmentUnit.equipment_type == unit.equipment_type,
@@ -72,18 +71,18 @@ class UnitOutageHandler:
             )
         ).all()
         for slot in slots:
-            target = await self._free_unit(alternatives, slot)
+            target = await self._free_unit(session, alternatives, slot)
             if target is not None:
-                outcome.moved.append(await self._move(slot, unit, target))
+                outcome.moved.append(await self._move(session, slot, unit, target))
             else:
-                outcome.cancelled.extend(await self._cancel(slot))
+                outcome.cancelled.extend(await self._cancel(session, slot))
         return outcome
 
     async def _free_unit(
-        self, candidates: list[EquipmentUnit], slot: TimetableSession
+        self, session: AsyncSession, candidates: list[EquipmentUnit], slot: TimetableSession
     ) -> EquipmentUnit | None:
         for candidate in candidates:
-            clash = await self.session.scalar(
+            clash = await session.scalar(
                 select(TimetableSession.id).where(
                     TimetableSession.equipment_unit_id == candidate.id,
                     TimetableSession.starts_at < slot.ends_at,
@@ -95,17 +94,21 @@ class UnitOutageHandler:
         return None
 
     async def _move(
-        self, slot: TimetableSession, unit: EquipmentUnit, target: EquipmentUnit
+        self,
+        session: AsyncSession,
+        slot: TimetableSession,
+        unit: EquipmentUnit,
+        target: EquipmentUnit,
     ) -> MovedSlot:
         slot.equipment_unit_id = target.id
         slot.resource_name = target.name
-        await self.session.execute(
+        await session.execute(
             update(Booking)
             .where(Booking.timetable_session_id == slot.id)
             .values(resource_name=target.name)
         )
-        await self.session.flush()
-        members = await self.session.scalars(
+        await session.flush()
+        members = await session.scalars(
             select(Booking.user_id).where(
                 Booking.timetable_session_id == slot.id,
                 Booking.status == BookingStatus.CONFIRMED,
@@ -113,9 +116,11 @@ class UnitOutageHandler:
         )
         return MovedSlot(slot.id, unit.name, target.name, list(members.all()))
 
-    async def _cancel(self, slot: TimetableSession) -> list[CancelledBooking]:
+    async def _cancel(
+        self, session: AsyncSession, slot: TimetableSession
+    ) -> list[CancelledBooking]:
         bookings = (
-            await self.session.scalars(
+            await session.scalars(
                 select(Booking)
                 .where(
                     Booking.timetable_session_id == slot.id,
@@ -126,7 +131,7 @@ class UnitOutageHandler:
         ).all()
         for booking in bookings:
             booking.status = BookingStatus.CANCELLED
-        await self.session.execute(
+        await session.execute(
             update(WaitlistEntry)
             .where(
                 WaitlistEntry.session_id == slot.id,
@@ -135,5 +140,5 @@ class UnitOutageHandler:
             .values(status=WaitlistStatus.EXPIRED)
         )
         slot.allocated_count = 0
-        await self.session.flush()
+        await session.flush()
         return [CancelledBooking(item.id, slot.id, item.user_id) for item in bookings]

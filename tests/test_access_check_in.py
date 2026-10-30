@@ -2,10 +2,10 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 import app.models  # noqa: F401  (registers every model so User can be created)
+from app.core.exceptions import AppError
 from app.models.access import AccessEvent, AccessZone
 from app.models.auth import User
-from app.modules.access.policies import AccessDeniedError
-from app.modules.access.service import AccessService
+from app.modules.access.access_service import AccessService
 
 
 class CheckInAccountTests(unittest.IsolatedAsyncioTestCase):
@@ -17,8 +17,6 @@ class CheckInAccountTests(unittest.IsolatedAsyncioTestCase):
         policy = MagicMock()
         policy.check = AsyncMock(return_value=True)
         service = AccessService(
-            session,
-            memberships=MagicMock(),
             policies={AccessZone.VIP_SAUNA: policy},
             occupancy=MagicMock(),
         )
@@ -28,8 +26,8 @@ class CheckInAccountTests(unittest.IsolatedAsyncioTestCase):
         disabled = User(email="member@example.test", password_hash="unused", is_active=False)
         service, session, policy = self.make_service(disabled)
 
-        with self.assertRaises(AccessDeniedError):
-            await service.check_in(3, AccessZone.VIP_SAUNA, source="face_recognition")
+        with self.assertRaises(AppError):
+            await service.check_in(session, 3, AccessZone.VIP_SAUNA, source="face_recognition")
 
         policy.check.assert_not_awaited()
         session.commit.assert_not_awaited()
@@ -37,8 +35,8 @@ class CheckInAccountTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_member_is_refused(self):
         service, session, policy = self.make_service(None)
 
-        with self.assertRaises(AccessDeniedError):
-            await service.check_in(999, AccessZone.VIP_SAUNA, source="face_recognition")
+        with self.assertRaises(AppError):
+            await service.check_in(session, 999, AccessZone.VIP_SAUNA, source="face_recognition")
 
         policy.check.assert_not_awaited()
         session.commit.assert_not_awaited()
@@ -47,9 +45,9 @@ class CheckInAccountTests(unittest.IsolatedAsyncioTestCase):
         active = User(email="member@example.test", password_hash="unused", is_active=True)
         service, session, policy = self.make_service(active)
 
-        await service.check_in(3, AccessZone.VIP_SAUNA, source="face_recognition")
+        await service.check_in(session, 3, AccessZone.VIP_SAUNA, source="face_recognition")
 
-        policy.check.assert_awaited_once_with(3, AccessZone.VIP_SAUNA)
+        policy.check.assert_awaited_once_with(session, 3, AccessZone.VIP_SAUNA)
         session.commit.assert_not_awaited()
 
 
@@ -61,6 +59,7 @@ class ManualCheckInTests(unittest.IsolatedAsyncioTestCase):
         service, session, policy = self.make_service(active)
 
         await service.check_in(
+            session,
             3,
             AccessZone.VIP_SAUNA,
             source="manual",
@@ -73,7 +72,7 @@ class ManualCheckInTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(access_log.event, AccessEvent.MANUAL_CHECK_IN)
         self.assertEqual(access_log.performed_by_staff_id, 7)
         self.assertEqual(access_log.staff_reason, "Scanner offline")
-        policy.check.assert_awaited_once_with(3, AccessZone.VIP_SAUNA)
+        policy.check.assert_awaited_once_with(session, 3, AccessZone.VIP_SAUNA)
 
     async def test_manual_check_in_without_staff_or_reason_is_refused(self):
         active = User(email="member@example.test", password_hash="unused", is_active=True)
@@ -81,8 +80,9 @@ class ManualCheckInTests(unittest.IsolatedAsyncioTestCase):
 
         for staff_id, reason in ((None, "Scanner offline"), (7, None), (7, "")):
             with self.subTest(staff_id=staff_id, reason=reason):
-                with self.assertRaises(ValueError):
+                with self.assertRaises(AppError):
                     await service.check_in(
+                        session,
                         3,
                         AccessZone.VIP_SAUNA,
                         source="manual",
@@ -98,7 +98,7 @@ class ManualCheckInTests(unittest.IsolatedAsyncioTestCase):
         active = User(email="member@example.test", password_hash="unused", is_active=True)
         service, session, _ = self.make_service(active)
 
-        await service.check_in(3, AccessZone.VIP_SAUNA, source="face_recognition")
+        await service.check_in(session, 3, AccessZone.VIP_SAUNA, source="face_recognition")
 
         access_log = session.add.call_args.args[0]
         self.assertIsNone(access_log.performed_by_staff_id)

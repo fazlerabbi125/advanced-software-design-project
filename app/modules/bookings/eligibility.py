@@ -34,12 +34,6 @@ class EligibilityFailure:
     message: str
 
 
-class BookingEligibilityError(ValueError):
-    def __init__(self, failures: Sequence[EligibilityFailure]) -> None:
-        self.failures = tuple(failures)
-        super().__init__("; ".join(failure.message for failure in failures))
-
-
 @dataclass(frozen=True)
 class BookingContext:
     now: datetime

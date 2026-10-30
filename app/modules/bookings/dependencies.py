@@ -2,18 +2,16 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from app.core.dependencies import DbSessionDep
 from app.modules.bookings.service import BookingService
-from app.modules.memberships.dependencies import MembershipServiceDependency
-from app.modules.notifications.dependencies import NotificationObserverDependency
+from app.modules.memberships.dependencies import MembershipServiceDep
+from app.modules.notifications.dependencies import NotificationObserverDep
 
 
 def get_booking_service(
-    session: DbSessionDep,
-    memberships: MembershipServiceDependency,
-    notifications: NotificationObserverDependency,
+    memberships: MembershipServiceDep,
+    notifications: NotificationObserverDep,
 ) -> BookingService:
-    return BookingService(session, memberships, notifications)
+    return BookingService(memberships, notifications)
 
 
-BookingServiceDependency = Annotated[BookingService, Depends(get_booking_service)]
+BookingServiceDep = Annotated[BookingService, Depends(get_booking_service)]

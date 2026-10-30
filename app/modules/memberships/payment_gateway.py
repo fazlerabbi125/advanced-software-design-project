@@ -77,7 +77,7 @@ class StripeCheckoutGateway(PaymentGateway):
     tests never call Stripe's API.
     """
 
-    def __init__(self, secret_key: str, success_url: str, cancel_url: str) -> None:
+    def __init__(self, secret_key: str, success_url: str, cancel_url: str | None = None) -> None:
         import stripe
 
         self._http_client = stripe.HTTPXClient()
@@ -88,23 +88,23 @@ class StripeCheckoutGateway(PaymentGateway):
     async def create_checkout(
         self, amount_minor: int, currency: str, *, plan_name: str
     ) -> PaymentResult:
-        session = await self._client.v1.checkout.sessions.create_async(
-            params={
-                "line_items": [
-                    {
-                        "price_data": {
-                            "currency": currency.lower(),
-                            "product_data": {"name": plan_name},
-                            "unit_amount": amount_minor,
-                        },
-                        "quantity": 1,
-                    }
-                ],
-                "mode": "payment",
-                "success_url": self._success_url,
-                "cancel_url": self._cancel_url,
-            }
-        )
+        params: dict[str, object] = {
+            "line_items": [
+                {
+                    "price_data": {
+                        "currency": currency.lower(),
+                        "product_data": {"name": plan_name},
+                        "unit_amount": amount_minor,
+                    },
+                    "quantity": 1,
+                }
+            ],
+            "mode": "payment",
+            "success_url": self._success_url,
+        }
+        if self._cancel_url is not None:
+            params["cancel_url"] = self._cancel_url
+        session = await self._client.v1.checkout.sessions.create_async(params=params)
         return PaymentResult(
             reference=session.id,
             status=PaymentStatus.PENDING,
@@ -131,6 +131,8 @@ class PaymentGatewayFactory:
             raise ValueError(f"unsupported payment provider: {settings.payment_provider}")
         return StripeCheckoutGateway(
             secret_key=settings.stripe_secret_key.get_secret_value(),
-            success_url=settings.stripe_success_url,
-            cancel_url=settings.stripe_cancel_url,
+            success_url=str(settings.stripe_success_url),
+            cancel_url=(
+                str(settings.stripe_cancel_url) if settings.stripe_cancel_url is not None else None
+            ),
         )

@@ -7,12 +7,14 @@ BFS_TEST_DATABASE_URL=postgresql+asyncpg://... uv run python -m unittest discove
 import os
 import unittest
 from datetime import timedelta
+from http import HTTPStatus
 from unittest.mock import patch
 from uuid import uuid4
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.core.exceptions import AppError
 from app.models import (
     Base,
     Booking,
@@ -26,15 +28,8 @@ from app.models import (
     WaitlistEntry,
     WaitlistStatus,
 )
-from app.modules.bookings.eligibility import BookingEligibilityError
 from app.modules.bookings.jobs import detect_no_shows, expire_waitlist_offers
-from app.modules.bookings.service import (
-    BookingService,
-    BookingStateError,
-    SessionFullError,
-    check_in_deadline,
-    offer_deadline,
-)
+from app.modules.bookings.service import BookingService, check_in_deadline, offer_deadline
 from app.modules.memberships.service import MembershipService
 from tests.test_booking_eligibility import NOW, membership
 
@@ -136,17 +131,19 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
 
     async def book(self, session_id, user_id):
         async with self.sessions() as session:
-            service = BookingService(session, MembershipService(session))
+            service = BookingService(MembershipService())
             try:
-                booking = await service.create(user_id, session_id)
+                booking = await service.create(session, [], user_id, session_id)
                 await session.commit()
                 return booking
-            except SessionFullError:
+            except AppError as error:
+                if not error.commit_required:
+                    raise
                 await session.commit()
                 raise
 
     async def join_waitlist(self, session_id, user_id):
-        with self.assertRaises(SessionFullError):
+        with self.assertRaises(AppError):
             await self.book(session_id, user_id)
         async with self.sessions() as session:
             return await session.scalar(
@@ -166,20 +163,20 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
 
     async def cancel_ann(self):
         async with self.sessions() as session:
-            await BookingService(session, MembershipService(session)).cancel(
-                self.ann, self.ann_booking.id
+            await BookingService(MembershipService()).cancel(
+                session, [], self.ann, self.ann_booking.id
             )
             await session.commit()
 
     async def accept(self, user_id, entry_id):
         async with self.sessions() as session:
-            service = BookingService(session, MembershipService(session))
+            service = BookingService(MembershipService())
             try:
-                booking = await service.accept_offer(user_id, entry_id)
+                booking = await service.accept_offer(session, [], user_id, entry_id)
                 await session.commit()
                 return booking
-            except BookingEligibilityError as error:
-                if getattr(error, "commit_required", False):
+            except AppError as error:
+                if error.commit_required:
                     await session.commit()
                 raise
 
@@ -213,10 +210,11 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(allocated, 1)
         self.assertEqual(statuses[self.ben], WaitlistStatus.ACCEPTED)
         # An accepted offer cannot be used twice, and nobody else can take Ben's offer.
-        with self.assertRaises(BookingStateError):
+        with self.assertRaises(AppError):
             await self.accept(self.ben, self.ben_entry.id)
-        with self.assertRaises(LookupError):
+        with self.assertRaises(AppError) as raised:
             await self.accept(self.cat, self.ben_entry.id)
+        self.assertEqual(raised.exception.status_code, HTTPStatus.NOT_FOUND)
 
     async def test_lapsed_offer_passes_to_the_next_member_then_frees_the_place(self):
         session_id = await self.full_class_with_waitlist()
@@ -235,7 +233,7 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
         await self.full_class_with_waitlist()
         await self.cancel_ann()
         self.at(NOW + 30 * MINUTE)
-        with self.assertRaises(BookingStateError):
+        with self.assertRaises(AppError):
             await self.accept(self.ben, self.ben_entry.id)
 
     async def test_ineligible_member_loses_the_offer_to_the_next_member(self):
@@ -247,7 +245,7 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
             )
             ben_membership.status = MembershipStatus.CANCELLED
             await session.commit()
-        with self.assertRaises(BookingEligibilityError) as raised:
+        with self.assertRaises(AppError) as raised:
             await self.accept(self.ben, self.ben_entry.id)
         self.assertEqual([item.code for item in raised.exception.failures], ["membership_inactive"])
         allocated, statuses = await self.state(session_id)
@@ -261,7 +259,7 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
         await self.run_job(expire_waitlist_offers, NOW + 30 * MINUTE)
         # Cat now holds the offer; Ben tries again and goes to the back of the list.
         self.at(NOW + 31 * MINUTE)
-        with self.assertRaises(SessionFullError) as raised:
+        with self.assertRaises(AppError) as raised:
             await self.book(session_id, self.ben)
         self.assertEqual(raised.exception.position, 1)
         self.assertEqual((await self.state(session_id))[1][self.ben], WaitlistStatus.WAITING)
@@ -369,7 +367,7 @@ class BookingJobTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(await self.run_job(detect_no_shows, NOW), 3)
         session_id = (await self.add(timetable_session())).id
-        with self.assertRaises(BookingEligibilityError) as raised:
+        with self.assertRaises(AppError) as raised:
             await self.book(session_id, member)
         self.assertEqual([item.code for item in raised.exception.failures], ["no_show_penalty"])
 

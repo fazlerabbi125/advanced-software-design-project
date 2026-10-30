@@ -6,8 +6,9 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.core.exceptions import AppError
 from app.models.auth import User
-from app.modules.bookings.eligibility import BookingEligibilityError, EligibilityFailure
+from app.modules.bookings.eligibility import EligibilityFailure
 from tests.settings import TEST_ENVIRONMENT
 
 
@@ -16,14 +17,14 @@ class BookingApiTests(unittest.TestCase):
         # Import the router with test-only settings; overridden dependencies never connect.
         with patch.dict(os.environ, TEST_ENVIRONMENT):
             from app.modules.auth.dependencies import get_current_user
-            from app.modules.bookings.endpoints.v1 import router
             from app.modules.bookings.dependencies import get_booking_service
+            from app.modules.bookings.endpoints.v1 import router
         service = AsyncMock()
         failures = [
             EligibilityFailure("plan_entitlement", "not included"),
             EligibilityFailure("weekly_limit", "limit reached"),
         ]
-        service.create.side_effect = BookingEligibilityError(failures)
+        service.create.side_effect = AppError("booking eligibility failed", 422, failures)
         app = FastAPI()
         app.include_router(router)
         app.dependency_overrides[get_current_user] = lambda: User(id=uuid4())

@@ -30,6 +30,7 @@ ZONE_STAY_MINUTES = {
 VIP_ROOM_CAPACITY = 8
 # A member who does not come back within this time loses their place on a VIP waiting list.
 VIP_WAITLIST_HOLD_MINUTES = 30
+SECONDS_PER_MINUTE = 60
 # Upper limits for manager-configured plans. Larger values overflow date arithmetic in
 # booking and renewal (e.g. now + timedelta(days=...)), or are clearly typos.
 MAX_PLAN_PRICE_MINOR = 1_000_000  # EUR 10,000
@@ -39,6 +40,7 @@ MAX_WEEKLY_BOOKING_LIMIT = 1000
 DEFAULT_PAGE_SIZE = 20
 HEALTH_CHECK_TIMEOUT_SECONDS = 5
 MAX_BIOMETRIC_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_BIOMETRIC_IMAGE_PIXELS = 16_000_000
 MAX_PAGE_SIZE = 100
 MIN_PASSWORD_LENGTH = 12
 ALLOWED_BIOMETRIC_IMAGE_TYPES = frozenset({"image/jpeg", "image/jpg", "image/png"})
@@ -48,6 +50,9 @@ BIOMETRIC_IMAGE_SUFFIXES = {
     "image/png": ".png",
 }
 BIOMETRIC_UPLOAD_CHUNK_BYTES = 1024 * 1024
+FACE_DETECTION_SCALE_FACTOR = 1.1
+FACE_DETECTION_MIN_NEIGHBORS = 5
+FACE_DETECTION_MIN_SIZE = (80, 80)
 # Members who miss this many booked sessions in the window cannot book again until
 # the oldest no-show falls outside the window.
 NO_SHOW_PENALTY_LIMIT = 3
@@ -64,5 +69,8 @@ CHECK_IN_GRACE_MINUTES = 10
 CHECK_IN_OPENS_MINUTES = 15
 # A member may book this many slots of one equipment type (e.g. squat racks) per day.
 MAX_EQUIPMENT_SLOTS_PER_TYPE_PER_DAY = 2
+EQUIPMENT_SLOT_CAPACITY = 1
+VIP_WAITLIST_HOLD_SECONDS = VIP_WAITLIST_HOLD_MINUTES * SECONDS_PER_MINUTE
+NOTIFICATION_SSE_POLL_SECONDS = 15.0
 # How often the scheduler expires offers and looks for no-shows.
 BOOKING_JOBS_INTERVAL_SECONDS = 60

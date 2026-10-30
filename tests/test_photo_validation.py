@@ -134,6 +134,19 @@ class PhotoValidatorTests(unittest.TestCase):
                     with self.assertRaisesRegex(PhotoValidationError, message):
                         self.validator().validate(image, "image/png")
 
+    def test_rejects_oversized_png_before_decoding(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            header = (
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+                + (4_001).to_bytes(4, "big")
+                + (4_001).to_bytes(4, "big")
+            )
+            image = self.write(Path(temporary), "oversized.png", header)
+            with patch("app.modules.members.photo_validation.cv2.imread") as decode:
+                with self.assertRaisesRegex(PhotoValidationError, "dimensions are too large"):
+                    self.validator().validate(image, "image/png")
+            decode.assert_not_called()
+
     def test_rejects_zero_or_multiple_faces(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             image = self.write(Path(temporary), "image.png", encoded_image(".png", sharp_image()))
