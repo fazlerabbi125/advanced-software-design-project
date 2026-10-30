@@ -41,6 +41,7 @@ from app.modules.timetable_sessions.schemas import (
     GenerateEquipmentSlotsRequest,
 )
 from app.modules.timetable_sessions.service import TimetableService
+from app.shared.pagination import PageParams
 from tests.test_booking_eligibility import NOW, membership
 
 EQUIPMENT = BookingResourceType.EQUIPMENT
@@ -146,6 +147,7 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
             unit = await FacilitiesService().register_unit(
                 session, name, equipment_type, "gym_floor"
             )
+            await session.commit()
             return unit.id
 
     async def add_member(self, name):
@@ -293,7 +295,14 @@ class EquipmentFaultTests(unittest.IsolatedAsyncioTestCase):
                 await service.resolve_fault(session, dismissed.id, self.staff_id)
             reported = await self.report(self.bike)
             self.assertEqual(
-                [item.id for item in await service.list_faults(session, FaultStatus.REPORTED)],
+                [
+                    item.id
+                    for item in (
+                        await service.list_faults(
+                            session, PageParams(page=1, limit=20), FaultStatus.REPORTED
+                        )
+                    ).items
+                ],
                 [reported],
             )
 

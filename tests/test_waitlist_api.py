@@ -10,29 +10,16 @@ from fastapi.testclient import TestClient
 from app.core.exceptions import AppError
 from app.models import Booking, BookingStatus, User, WaitlistEntry, WaitlistStatus
 from app.modules.bookings.eligibility import EligibilityFailure
+from app.shared.pagination import CursorMeta, CursorResult
+from tests.settings import TEST_ENVIRONMENT
 from tests.test_booking_eligibility import NOW
 from tests.test_booking_jobs import timetable_session
-
-SETTINGS = {
-    "POSTGRES_HOST": "127.0.0.1",
-    "POSTGRES_DB": "unused",
-    "POSTGRES_USER": "unused",
-    "POSTGRES_PASSWORD": "unused",
-    "CACHE_REDIS_URL": "redis://127.0.0.1:1",
-    "JWT_ACCESS_SECRET_KEY": "test-only-access",
-    "JWT_REFRESH_SECRET_KEY": "test-refresh",
-    "JWT_ISSUER": "test",
-    "JWT_AUDIENCE": "test",
-    "UPLOAD_ROOT": "/tmp/bfs-test-unused",
-    "STRIPE_SECRET_KEY": "sk_test_unused",
-    "STRIPE_WEBHOOK_SECRET": "whsec_unused",
-}
 
 
 class WaitlistApiTests(unittest.TestCase):
     def setUp(self):
         # Import the router with test-only settings; overridden dependencies never connect.
-        with patch.dict(os.environ, SETTINGS):
+        with patch.dict(os.environ, TEST_ENVIRONMENT):
             from app.modules.auth.dependencies import get_current_user
             from app.modules.bookings.dependencies import get_booking_service
             from app.modules.bookings.endpoints.v1 import router
@@ -84,13 +71,22 @@ class WaitlistApiTests(unittest.TestCase):
             id=2, session_id=1, status=WaitlistStatus.OFFERED, offered_at=NOW, session=session
         )
         waiting = WaitlistEntry(id=1, session_id=1, status=WaitlistStatus.WAITING, session=session)
-        self.service.list_waitlist_for_user.return_value = [offered, waiting]
+        self.service.list_waitlist_for_user.return_value = CursorResult(
+            [offered, waiting],
+            CursorMeta(
+                limit=20,
+                next_cursor=None,
+                previous_cursor=None,
+                has_next=False,
+                has_previous=False,
+            ),
+        )
 
         body = self.client.get("/bookings/waitlist/me").json()
 
         expires = (NOW + timedelta(minutes=30)).isoformat().replace("+00:00", "Z")
         self.assertEqual(
-            [(item["status"], item["offer_expires_at"]) for item in body],
+            [(item["status"], item["offer_expires_at"]) for item in body["items"]],
             [("offered", expires), ("waiting", None)],
         )
 

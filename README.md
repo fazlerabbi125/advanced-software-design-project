@@ -51,7 +51,7 @@ The business rules include membership plans with configurable booking windows an
 The project follows a **monolithic MVC/REST architecture**:
 
 - **Models** (`app/models/`) — SQLAlchemy ORM models define the database schema.
-- **Services** (`app/modules/*/*_service.py`) — contain all business logic; routers never query the database directly.
+- **Services** (`app/modules/*/service.py`, `app/modules/*/*_service.py`) — contain all business logic; routers never query the database directly.
 - **Routers/Controllers** (`app/modules/*/endpoints/v1.py`) — FastAPI route handlers that validate requests, call services, and return responses.
 
 ### Data Models & Entity Relationships
