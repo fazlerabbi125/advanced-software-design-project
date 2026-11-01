@@ -381,7 +381,11 @@ class MembershipService:
             raise AppError(
                 "this plan is no longer on sale, please choose another", HTTPStatus.NOT_FOUND
             )
-        terms = state_of(membership, today).renewal_terms(membership, plan.duration_days, today)
+        membership_state = state_of(membership, today)
+        terms = membership_state.renewal_terms(membership, plan.duration_days, today)
+        renewed_from_membership_id = (
+            membership.id if membership_state.status == MembershipStatus.ACTIVE else None
+        )
 
         payment = await self.payment_gateway.create_checkout(
             plan.price_minor, plan.currency, plan_name=plan.name
@@ -402,6 +406,7 @@ class MembershipService:
             ends_on=terms.ends_on,
             payment_reference=payment.reference,
             stripe_session_id=payment.reference,
+            renewed_from_membership_id=renewed_from_membership_id,
         )
         session.add(membership)
         await session.flush()

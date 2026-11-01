@@ -6,7 +6,7 @@ The tests create and drop their own schema within that database.
 
 import os
 import unittest
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -21,12 +21,14 @@ from app.models import (
     MembershipEntitlement,
     MembershipStatus,
     PlanEntitlement,
+    StripeEvent,
     TimetableSession,
     User,
 )
 from app.modules.bookings.service import BookingService
 from app.modules.memberships.payment_gateway import PaymentResult, PaymentStatus
 from app.modules.memberships.service import MembershipService
+from app.modules.payments.service import StripeWebhookService
 from app.shared.pagination import PageParams
 from tests.test_booking_eligibility import NOW
 
@@ -36,9 +38,12 @@ GYM = MembershipEntitlement.GYM_FLOOR_ACCESS
 
 
 class PendingPaymentGateway:
+    def __init__(self, reference="checkout_test"):
+        self.reference = reference
+
     async def create_checkout(self, amount_minor, currency, *, plan_name):
         return PaymentResult(
-            reference="checkout_test",
+            reference=self.reference,
             status=PaymentStatus.PENDING,
             amount_minor=amount_minor,
             currency=currency,
@@ -206,6 +211,7 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_cancellation_revokes_overlapping_active_renewals(self):
+        today = datetime.now(UTC).date()
         async with self.sessions() as session:
             user = User(email="renewal@example.test", password_hash="unused")
             session.add(user)
@@ -214,15 +220,15 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
                 user_id=user.id,
                 plan_id=self.standard.id,
                 status=MembershipStatus.ACTIVE,
-                starts_on=(NOW - timedelta(days=10)).date(),
-                ends_on=(NOW + timedelta(days=20)).date(),
+                starts_on=today - timedelta(days=10),
+                ends_on=today + timedelta(days=20),
             )
             renewed = Membership(
                 user_id=user.id,
                 plan_id=self.standard.id,
                 status=MembershipStatus.ACTIVE,
                 starts_on=original.starts_on,
-                ends_on=(NOW + timedelta(days=50)).date(),
+                ends_on=today + timedelta(days=50),
             )
             session.add_all((original, renewed))
             await session.commit()
@@ -247,13 +253,131 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
             )
             service = MembershipService()
             self.assertEqual([row.status for row in rows], [MembershipStatus.CANCELLED] * 2)
-            self.assertFalse(await service.has_active_membership(session, user_id, NOW.date()))
-            self.assertFalse(await service.has_entitlement(session, user_id, GYM, NOW.date()))
+            self.assertFalse(await service.has_active_membership(session, user_id, today))
+            self.assertFalse(await service.has_entitlement(session, user_id, GYM, today))
 
             purchased = await MembershipService(PendingPaymentGateway()).purchase(
                 session, user_id, self.standard.id
             )
             self.assertEqual(purchased.membership.status, MembershipStatus.PENDING)
+
+    async def test_paid_early_renewal_supersedes_predecessor_and_is_idempotent(self):
+        today = datetime.now(UTC).date()
+        async with self.sessions() as session:
+            user = User(email="renew-success@example.test", password_hash="unused")
+            session.add(user)
+            await session.flush()
+            predecessor = Membership(
+                user_id=user.id,
+                plan_id=self.standard.id,
+                status=MembershipStatus.ACTIVE,
+                starts_on=today - timedelta(days=10),
+                ends_on=today + timedelta(days=20),
+            )
+            session.add(predecessor)
+            await session.commit()
+            user_id = user.id
+            predecessor_id = predecessor.id
+
+        async with self.sessions() as session:
+            renewal = await MembershipService(PendingPaymentGateway("checkout-success")).renew(
+                session, [], user_id
+            )
+            await session.commit()
+            renewal_id = renewal.membership.id
+            self.assertEqual(renewal.membership.renewed_from_membership_id, predecessor_id)
+
+        async with self.sessions() as session:
+            outcome = await StripeWebhookService().process_checkout(
+                session,
+                [],
+                stripe_event_id="event-success",
+                stripe_session_id="checkout-success",
+                payment_succeeded=True,
+            )
+            await session.commit()
+        self.assertEqual(outcome, "activated")
+
+        async with self.sessions() as session:
+            predecessor = await session.get(Membership, predecessor_id)
+            renewal = await session.get(Membership, renewal_id)
+            self.assertEqual(predecessor.status, MembershipStatus.CANCELLED)
+            self.assertEqual(renewal.status, MembershipStatus.ACTIVE)
+            duplicate = await StripeWebhookService().process_checkout(
+                session,
+                [],
+                stripe_event_id="event-success",
+                stripe_session_id="checkout-success",
+                payment_succeeded=True,
+            )
+            self.assertEqual(duplicate, "ignored")
+            self.assertEqual(len((await session.scalars(select(StripeEvent))).all()), 1)
+
+    async def test_failed_early_renewal_keeps_predecessor_active(self):
+        today = datetime.now(UTC).date()
+        async with self.sessions() as session:
+            user = User(email="renew-failure@example.test", password_hash="unused")
+            session.add(user)
+            await session.flush()
+            predecessor = Membership(
+                user_id=user.id,
+                plan_id=self.standard.id,
+                status=MembershipStatus.ACTIVE,
+                starts_on=today - timedelta(days=10),
+                ends_on=today + timedelta(days=20),
+            )
+            session.add(predecessor)
+            await session.commit()
+            user_id = user.id
+            predecessor_id = predecessor.id
+
+        async with self.sessions() as session:
+            renewal = await MembershipService(PendingPaymentGateway("checkout-failure")).renew(
+                session, [], user_id
+            )
+            await session.commit()
+            renewal_id = renewal.membership.id
+
+        async with self.sessions() as session:
+            outcome = await StripeWebhookService().process_checkout(
+                session,
+                [],
+                stripe_event_id="event-failure",
+                stripe_session_id="checkout-failure",
+                payment_succeeded=False,
+            )
+            await session.commit()
+        self.assertEqual(outcome, "cancelled")
+
+        async with self.sessions() as session:
+            predecessor = await session.get(Membership, predecessor_id)
+            renewal = await session.get(Membership, renewal_id)
+            self.assertEqual(predecessor.status, MembershipStatus.ACTIVE)
+            self.assertEqual(renewal.status, MembershipStatus.CANCELLED)
+
+    async def test_expired_renewal_has_no_predecessor_link(self):
+        today = datetime.now(UTC).date()
+        async with self.sessions() as session:
+            user = User(email="renew-expired@example.test", password_hash="unused")
+            session.add(user)
+            await session.flush()
+            expired = Membership(
+                user_id=user.id,
+                plan_id=self.standard.id,
+                status=MembershipStatus.EXPIRED,
+                starts_on=today - timedelta(days=40),
+                ends_on=today - timedelta(days=10),
+            )
+            session.add(expired)
+            await session.commit()
+            user_id = user.id
+
+        async with self.sessions() as session:
+            renewal = await MembershipService(PendingPaymentGateway("checkout-expired")).renew(
+                session, [], user_id
+            )
+
+        self.assertIsNone(renewal.membership.renewed_from_membership_id)
 
 
 if __name__ == "__main__":

@@ -70,7 +70,63 @@ class FakePubSub:
         return message
 
 
+class ExpiringNotification:
+    def __init__(self, state):
+        self.state = state
+
+    def _value(self, value):
+        if self.state["expired"]:
+            raise AssertionError("notification was accessed after rollback")
+        return value
+
+    @property
+    def id(self):
+        return self._value(12)
+
+    @property
+    def event_type(self):
+        return self._value(NotificationType.BOOKING_CONFIRMED)
+
+    @property
+    def payload(self):
+        return self._value({"booking_id": 42})
+
+    @property
+    def is_read(self):
+        return self._value(False)
+
+    @property
+    def created_at(self):
+        return self._value(datetime(2026, 10, 28, tzinfo=UTC))
+
+    @property
+    def read_at(self):
+        return self._value(None)
+
+
 class NotificationFeedTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_serializes_unread_notifications_before_rollback(self) -> None:
+        state = {"expired": False}
+        notification = ExpiringNotification(state)
+        pubsub = FakePubSub(None)
+        redis = MagicMock()
+        redis.pubsub.return_value = pubsub
+        session = MagicMock()
+
+        async def rollback():
+            state["expired"] = True
+
+        session.rollback = AsyncMock(side_effect=rollback)
+        feed = NotificationFeed(redis)
+        feed.unread_for_user = AsyncMock(return_value=[notification])
+        stream = feed.stream(session, uuid4(), AsyncMock(return_value=True))
+
+        replay = await anext(stream)
+        await stream.aclose()
+
+        self.assertIn("id: 12", replay)
+        self.assertIn('"booking_id":42', replay)
+
     async def test_stream_replays_unread_then_forwards_live_notification(self) -> None:
         unread = make_notification(notification_id=10)
         live = make_notification(notification_id=11)

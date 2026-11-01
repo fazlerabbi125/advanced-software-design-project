@@ -107,10 +107,13 @@ class NotificationFeed:
         pubsub = self.redis.pubsub()
         await pubsub.subscribe(NotificationPublisher.channel(user_id))
         try:
-            unread = await self.unread_for_user(session, user_id)
+            unread = [
+                (NotificationPublisher.payload(notification), notification.id)
+                for notification in await self.unread_for_user(session, user_id)
+            ]
             await session.rollback()
-            for notification in unread:
-                yield self._sse(NotificationPublisher.payload(notification), notification.id)
+            for payload, notification_id in unread:
+                yield self._sse(payload, notification_id)
             while not await is_disconnected():
                 try:
                     message = await pubsub.get_message(

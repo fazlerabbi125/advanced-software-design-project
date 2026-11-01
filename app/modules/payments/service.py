@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.auth import User
 from app.models.memberships import Membership, MembershipStatus, StripeEvent
 from app.models.notifications import NotificationType
 from app.modules.notifications.service import NotificationEvent, NotificationObserver
@@ -55,6 +56,21 @@ class StripeWebhookService:
         if inserted_event_id is None:
             return "duplicate"
 
+        if payment_succeeded:
+            await session.execute(
+                select(User.id).where(User.id == membership.user_id).with_for_update()
+            )
+            if membership.renewed_from_membership_id is not None:
+                predecessor = await session.scalar(
+                    select(Membership)
+                    .where(
+                        Membership.id == membership.renewed_from_membership_id,
+                        Membership.user_id == membership.user_id,
+                    )
+                    .with_for_update()
+                )
+                if predecessor is not None and predecessor.status == MembershipStatus.ACTIVE:
+                    predecessor.status = MembershipStatus.CANCELLED
         membership.status = (
             MembershipStatus.ACTIVE if payment_succeeded else MembershipStatus.CANCELLED
         )
