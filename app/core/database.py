@@ -15,7 +15,7 @@ settings = get_settings()
 engine: AsyncEngine = create_async_engine(
     settings.sqlalchemy_url, pool_pre_ping=True, echo=settings.enable_debug
 )
-session_factory = async_sessionmaker(engine, expire_on_commit=False)
+session_factory = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
 
 
 async def get_db_session() -> AsyncIterator[AsyncSession]:
@@ -23,11 +23,11 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-async def close_engine() -> None:
+async def close_db_engine() -> None:
     await engine.dispose()
 
 
-async def is_database_available() -> bool:
+async def is_db_available() -> bool:
     try:
         async with engine.connect() as connection:
             await connection.execute(text("SELECT 1"))

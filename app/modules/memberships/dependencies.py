@@ -1,30 +1,24 @@
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 
-from app.core.config import Settings, get_settings
-from app.core.dependencies import DbSession
-from app.modules.memberships.payment_gateway import PaymentGateway, PaymentGatewayFactory
+from app.modules.memberships.payment_gateway import PaymentGateway
 from app.modules.memberships.service import MembershipService
+from app.modules.notifications.dependencies import NotificationObserverDep
 
 
-def get_payment_gateway(settings: Annotated[Settings, Depends(get_settings)]) -> PaymentGateway:
-    """FastAPI dependency: use PaymentGatewayFactory to get the configured gateway.
-
-    The factory reads ``settings.stripe_secret_key`` and returns a
-    ``StripeCheckoutGateway``. Service code only sees the ``PaymentGateway``
-    protocol — it never inspects settings itself.
-    """
-    return PaymentGatewayFactory.create(settings)
+def get_payment_gateway(request: Request) -> PaymentGateway:
+    return request.app.state.payment_gateway
 
 
-PaymentGatewayDependency = Annotated[PaymentGateway, Depends(get_payment_gateway)]
+PaymentGatewayDep = Annotated[PaymentGateway, Depends(get_payment_gateway)]
 
 
 def get_membership_service(
-    session: DbSession, payment_gateway: PaymentGatewayDependency
+    payment_gateway: PaymentGatewayDep,
+    notifications: NotificationObserverDep,
 ) -> MembershipService:
-    return MembershipService(session, payment_gateway)
+    return MembershipService(payment_gateway, notifications)
 
 
-MembershipServiceDependency = Annotated[MembershipService, Depends(get_membership_service)]
+MembershipServiceDep = Annotated[MembershipService, Depends(get_membership_service)]

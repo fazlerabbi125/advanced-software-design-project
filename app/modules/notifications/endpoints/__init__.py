@@ -1,0 +1,1 @@
+"""Versioned notification HTTP endpoints."""
