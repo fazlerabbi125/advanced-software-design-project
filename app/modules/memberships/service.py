@@ -323,24 +323,30 @@ class MembershipService:
     async def cancel(
         self, session: AsyncSession, pending_notifications: list, user_id: UUID
     ) -> Membership:
-        """Cancel the member's currently active membership."""
+        """Cancel every currently active membership for the member."""
         await self.lock_member(session, user_id)
         today = datetime.now(UTC).date()
-        membership = await session.scalar(
-            select(Membership)
-            .where(
-                Membership.user_id == user_id,
-                Membership.status == MembershipStatus.ACTIVE,
-                Membership.starts_on <= today,
-                Membership.ends_on >= today,
-            )
-            .options(selectinload(Membership.plan))
-            .order_by(Membership.id.desc())
-            .limit(1)
+        memberships = list(
+            (
+                await session.scalars(
+                    select(Membership)
+                    .where(
+                        Membership.user_id == user_id,
+                        Membership.status == MembershipStatus.ACTIVE,
+                        Membership.starts_on <= today,
+                        Membership.ends_on >= today,
+                    )
+                    .options(selectinload(Membership.plan))
+                    .order_by(Membership.id.desc())
+                    .with_for_update()
+                )
+            ).all()
         )
-        if membership is None:
+        if not memberships:
             raise AppError("you do not have an active membership", HTTPStatus.NOT_FOUND)
-        state_of(membership, today).cancel(membership)
+        for membership in memberships:
+            state_of(membership, today).cancel(membership)
+        membership = memberships[0]
         await self._record(
             session,
             pending_notifications,

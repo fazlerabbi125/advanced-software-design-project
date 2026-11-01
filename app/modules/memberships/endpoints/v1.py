@@ -155,7 +155,7 @@ async def list_my_memberships(
 
 
 @router.post(
-    "/me/cancel", response_model=MembershipResponse, description="Cancel your latest membership."
+    "/me/cancel", response_model=MembershipResponse, description="Cancel your active memberships."
 )
 async def cancel_my_membership(
     current_user: CurrentUser,

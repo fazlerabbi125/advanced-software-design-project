@@ -25,6 +25,7 @@ from app.models import (
     User,
 )
 from app.modules.bookings.service import BookingService
+from app.modules.memberships.payment_gateway import PaymentResult, PaymentStatus
 from app.modules.memberships.service import MembershipService
 from app.shared.pagination import PageParams
 from tests.test_booking_eligibility import NOW
@@ -32,6 +33,16 @@ from tests.test_booking_eligibility import NOW
 CLASS = MembershipEntitlement.CLASS_BOOKING
 POOL = MembershipEntitlement.POOL_BOOKING
 GYM = MembershipEntitlement.GYM_FLOOR_ACCESS
+
+
+class PendingPaymentGateway:
+    async def create_checkout(self, amount_minor, currency, *, plan_name):
+        return PaymentResult(
+            reference="checkout_test",
+            status=PaymentStatus.PENDING,
+            amount_minor=amount_minor,
+            currency=currency,
+        )
 
 
 @unittest.skipUnless(os.getenv("BFS_TEST_DATABASE_URL"), "set a disposable BFS_TEST_DATABASE_URL")
@@ -193,6 +204,56 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
             {item.code for item in raised.exception.failures},
             {"plan_entitlement", "booking_window", "weekly_limit"},
         )
+
+    async def test_cancellation_revokes_overlapping_active_renewals(self):
+        async with self.sessions() as session:
+            user = User(email="renewal@example.test", password_hash="unused")
+            session.add(user)
+            await session.flush()
+            original = Membership(
+                user_id=user.id,
+                plan_id=self.standard.id,
+                status=MembershipStatus.ACTIVE,
+                starts_on=(NOW - timedelta(days=10)).date(),
+                ends_on=(NOW + timedelta(days=20)).date(),
+            )
+            renewed = Membership(
+                user_id=user.id,
+                plan_id=self.standard.id,
+                status=MembershipStatus.ACTIVE,
+                starts_on=original.starts_on,
+                ends_on=(NOW + timedelta(days=50)).date(),
+            )
+            session.add_all((original, renewed))
+            await session.commit()
+            user_id = user.id
+            renewed_id = renewed.id
+
+        async with self.sessions() as session:
+            service = MembershipService()
+            cancelled = await service.cancel(session, [], user_id)
+            await session.commit()
+
+        self.assertEqual(cancelled.id, renewed_id)
+        async with self.sessions() as session:
+            rows = list(
+                (
+                    await session.scalars(
+                        select(Membership)
+                        .where(Membership.user_id == user_id)
+                        .order_by(Membership.id)
+                    )
+                ).all()
+            )
+            service = MembershipService()
+            self.assertEqual([row.status for row in rows], [MembershipStatus.CANCELLED] * 2)
+            self.assertFalse(await service.has_active_membership(session, user_id, NOW.date()))
+            self.assertFalse(await service.has_entitlement(session, user_id, GYM, NOW.date()))
+
+            purchased = await MembershipService(PendingPaymentGateway()).purchase(
+                session, user_id, self.standard.id
+            )
+            self.assertEqual(purchased.membership.status, MembershipStatus.PENDING)
 
 
 if __name__ == "__main__":
