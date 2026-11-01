@@ -3,15 +3,14 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.dependencies import DbSessionDep
+from app.core.exceptions import AppError, http_error
 from app.models.access import AccessEvent, AccessZone
 from app.models.auth import User, UserRole
-from app.modules.access.biometric_service import BiometricScanDeniedError
 from app.modules.access.dependencies import (
-    AccessServiceDependency,
-    BiometricAccessServiceDependency,
-    ScannerDeviceDependency,
+    AccessServiceDep,
+    AuthenticatedScannerDep,
+    ScannerCheckInServiceDep,
 )
-from app.modules.access.policies import ZoneFullError
 from app.modules.access.schemas import (
     AccessLogResponse,
     CheckInRequest,
@@ -33,24 +32,21 @@ router = APIRouter(prefix="/access", tags=["access"])
 async def check_in(
     payload: CheckInRequest,
     session: DbSessionDep,
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     current_user: CurrentUser,
 ) -> Any:
     member_id = payload.member_id or current_user.id
-    if member_id != current_user.id and current_user.role not in {UserRole.STAFF, UserRole.MANAGER}:
+    if member_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
         )
     result = None
     try:
-        result = await service.check_in(member_id, payload.zone)
+        result = await service.check_in(session, member_id, payload.zone)
         await session.commit()
-    except ZoneFullError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except ValueError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         if result is not None and result.took_new_place:
@@ -68,12 +64,13 @@ async def check_in(
 async def manual_check_in(
     payload: ManualCheckInRequest,
     session: DbSessionDep,
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     staff: Annotated[User, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
 ) -> Any:
     result = None
     try:
         result = await service.check_in(
+            session,
             payload.member_id,
             payload.zone,
             source="manual",
@@ -82,12 +79,9 @@ async def manual_check_in(
             reason=payload.reason,
         )
         await session.commit()
-    except ZoneFullError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except ValueError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         if result is not None and result.took_new_place:
@@ -105,7 +99,7 @@ async def manual_check_in(
 async def check_out(
     payload: CheckInRequest,
     session: DbSessionDep,
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     current_user: CurrentUser,
 ) -> Any:
     member_id = payload.member_id or current_user.id
@@ -114,7 +108,7 @@ async def check_out(
             status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
         )
     try:
-        access_log = await service.check_out(member_id, payload.zone)
+        access_log = await service.check_out(session, member_id, payload.zone)
         await session.commit()
     except Exception:
         await session.rollback()
@@ -125,7 +119,7 @@ async def check_out(
 
 @router.get("/occupancy", description="Show current zone occupancy for staff.")
 async def current_occupancy(
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     _: Annotated[object, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
 ) -> dict[str, int]:
     return await service.current_occupancy()
@@ -140,26 +134,20 @@ async def current_occupancy(
 async def device_check_in(
     payload: DeviceCheckInRequest,
     session: DbSessionDep,
-    service: BiometricAccessServiceDependency,
-    scanner: ScannerDeviceDependency,
+    service: ScannerCheckInServiceDep,
+    scanner: AuthenticatedScannerDep,
 ) -> Any:
     result = None
     try:
-        result = await service.check_in(payload, scanner)
+        result = await service.check_in(session, payload, scanner)
         await session.commit()
-    except BiometricScanDeniedError as error:
+    except AppError as error:
         try:
             await session.commit()
         except Exception:
             await session.rollback()
             raise
-        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
-    except ZoneFullError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    except ValueError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         if result is not None and result.took_new_place:
@@ -175,7 +163,7 @@ async def device_check_in(
 )
 async def my_waitlist_position(
     zone: AccessZone,
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     current_user: CurrentUser,
 ) -> Any:
     position = await service.waitlist_position(current_user.id, zone)
@@ -187,7 +175,7 @@ async def my_waitlist_position(
 )
 async def leave_waitlist(
     zone: AccessZone,
-    service: AccessServiceDependency,
+    service: AccessServiceDep,
     current_user: CurrentUser,
 ) -> None:
     await service.leave_waitlist(current_user.id, zone)

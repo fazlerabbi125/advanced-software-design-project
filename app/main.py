@@ -67,14 +67,3 @@ async def health_check() -> dict[str, str]:
             detail="Required dependency unavailable",
         )
     return {"status": "ok"}
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(
-        "app.main:app",
-        host=settings.app_host,
-        port=settings.app_port,
-        reload=settings.enable_debug,
-    )

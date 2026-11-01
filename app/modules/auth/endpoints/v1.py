@@ -1,9 +1,10 @@
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 
 from app.core.dependencies import DbSessionDep
-from app.modules.auth.dependencies import AuthServiceDependency
+from app.core.exceptions import AppError, http_error
+from app.modules.auth.dependencies import AuthServiceDep
 from app.modules.auth.schemas import (
     LoginRequest,
     RefreshRequest,
@@ -21,46 +22,44 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     status_code=status.HTTP_201_CREATED,
     description="Register a member account.",
 )
-async def register(
-    payload: RegisterRequest, session: DbSessionDep, service: AuthServiceDependency
-) -> Any:
+async def register(payload: RegisterRequest, session: DbSessionDep, service: AuthServiceDep) -> Any:
     try:
-        user = await service.register(payload.email, payload.password, payload.name, payload.phone)
+        user = await service.register(
+            session, payload.email, payload.password, payload.name, payload.phone
+        )
         await session.commit()
         return user
-    except ValueError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
 
 
 @router.post("/login", response_model=TokenResponse, description="Sign in and issue JWT tokens.")
-async def login(payload: LoginRequest, session: DbSessionDep, service: AuthServiceDependency) -> Any:
+async def login(payload: LoginRequest, session: DbSessionDep, service: AuthServiceDep) -> Any:
     try:
-        tokens = await service.login(payload.email, payload.password)
+        tokens = await service.login(session, payload.email, payload.password)
         await session.commit()
         return tokens
-    except ValueError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
 
 
 @router.post("/refresh", response_model=TokenResponse, description="Rotate a refresh token.")
-async def refresh(
-    payload: RefreshRequest, session: DbSessionDep, service: AuthServiceDependency
-) -> Any:
+async def refresh(payload: RefreshRequest, session: DbSessionDep, service: AuthServiceDep) -> Any:
     try:
-        tokens = await service.rotate_refresh_token(payload.refresh_token)
+        tokens = await service.rotate_refresh_token(session, payload.refresh_token)
         await session.commit()
         return tokens
-    except ValueError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise

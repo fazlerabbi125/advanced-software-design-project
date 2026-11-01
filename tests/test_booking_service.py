@@ -14,6 +14,7 @@ from uuid import uuid4
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.core.exceptions import AppError
 from app.models import (
     Base,
     Booking,
@@ -23,13 +24,7 @@ from app.models import (
     User,
     WaitlistEntry,
 )
-from app.modules.bookings.eligibility import BookingEligibilityError
-from app.modules.bookings.service import (
-    BookingService,
-    BookingStateError,
-    SessionFullError,
-    SessionNotFoundError,
-)
+from app.modules.bookings.service import BookingService
 from app.modules.memberships.service import MembershipService
 from tests.test_booking_eligibility import NOW, membership
 
@@ -86,12 +81,14 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def book(self, session_id, user_id=None):
         async with self.sessions() as session:
-            service = BookingService(session, MembershipService(session))
+            service = BookingService(MembershipService())
             try:
-                booking = await service.create(user_id or self.user_id, session_id)
+                booking = await service.create(session, [], user_id or self.user_id, session_id)
                 await session.commit()
                 return booking
-            except SessionFullError:
+            except AppError as error:
+                if not error.commit_required:
+                    raise
                 await session.commit()
                 raise
 
@@ -121,7 +118,7 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_success_then_rejection_does_not_write(self):
         result = await self.create()
         self.assertEqual(result.status, BookingStatus.CONFIRMED)
-        with self.assertRaises(BookingEligibilityError) as raised:
+        with self.assertRaises(AppError) as raised:
             await self.create()
         self.assertEqual(
             [item.code for item in raised.exception.failures], ["weekly_limit", "time_conflict"]
@@ -132,21 +129,21 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_concurrent_requests_cannot_exceed_weekly_limit(self):
         results = await asyncio.gather(self.create(), self.create(60), return_exceptions=True)
         self.assertEqual(sum(isinstance(item, Booking) for item in results), 1)
-        failures = [item for item in results if isinstance(item, BookingEligibilityError)]
+        failures = [item for item in results if isinstance(item, AppError)]
         self.assertEqual(len(failures), 1)
         self.assertEqual([item.code for item in failures[0].failures], ["weekly_limit"])
 
     async def test_cancelled_slot_can_be_rebooked(self):
         first = await self.create()
         async with self.sessions() as session:
-            await BookingService(session, MembershipService(session)).cancel(self.user_id, first.id)
+            await BookingService(MembershipService()).cancel(session, [], self.user_id, first.id)
             await session.commit()
         second = await self.create()
         self.assertEqual(first.id, second.id)
         self.assertEqual(second.status, BookingStatus.CONFIRMED)
 
     async def test_unknown_session_rejected(self):
-        with self.assertRaises(SessionNotFoundError):
+        with self.assertRaises(AppError):
             await self.book(999_999)
 
     async def test_missing_membership_rejected(self):
@@ -155,10 +152,8 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
             session.add(user)
             await session.commit()
             session_id = await self.add_session()
-            with self.assertRaises(BookingEligibilityError) as raised:
-                await BookingService(session, MembershipService(session)).create(
-                    user.id, session_id
-                )
+            with self.assertRaises(AppError) as raised:
+                await BookingService(MembershipService()).create(session, [], user.id, session_id)
             self.assertEqual(
                 [item.code for item in raised.exception.failures], ["membership_inactive"]
             )
@@ -169,9 +164,7 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(booking.timetable_session_id, session_id)
         self.assertEqual(await self.allocated(session_id), 1)
         async with self.sessions() as session:
-            await BookingService(session, MembershipService(session)).cancel(
-                self.user_id, booking.id
-            )
+            await BookingService(MembershipService()).cancel(session, [], self.user_id, booking.id)
             await session.commit()
         self.assertEqual(await self.allocated(session_id), 0)
 
@@ -179,11 +172,11 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
         session_id = await self.add_session(capacity=1)
         await self.book(session_id)
         other = await self.add_member("other@example.test")
-        with self.assertRaises(SessionFullError) as raised:
+        with self.assertRaises(AppError) as raised:
             await self.book(session_id, other)
         self.assertEqual(raised.exception.position, 1)
         # Trying again does not add a second waiting-list entry.
-        with self.assertRaises(SessionFullError):
+        with self.assertRaises(AppError):
             await self.book(session_id, other)
         async with self.sessions() as session:
             entries = (await session.scalars(select(WaitlistEntry))).all()
@@ -200,26 +193,26 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
             self.book(session_id, first), self.book(session_id, second), return_exceptions=True
         )
         self.assertEqual(sum(isinstance(item, Booking) for item in results), 1)
-        self.assertEqual(sum(isinstance(item, SessionFullError) for item in results), 1)
+        self.assertEqual(sum(isinstance(item, AppError) for item in results), 1)
         self.assertEqual(await self.allocated(session_id), 1)
 
     async def test_check_in_only_once(self):
         booking = await self.create()
         self.now.return_value = booking.starts_at  # the class is starting
         async with self.sessions() as session:
-            checked_in = await BookingService(session, MembershipService(session)).check_in(
-                self.user_id, booking.id
+            checked_in = await BookingService(MembershipService()).check_in(
+                session, self.user_id, booking.id
             )
             await session.commit()
         self.assertEqual(checked_in.status, BookingStatus.CHECKED_IN)
         async with self.sessions() as session:
-            with self.assertRaises(BookingStateError):
-                await BookingService(session, MembershipService(session)).check_in(
-                    self.user_id, booking.id
+            with self.assertRaises(AppError):
+                await BookingService(MembershipService()).check_in(
+                    session, self.user_id, booking.id
                 )
-            with self.assertRaises(BookingStateError):
-                await BookingService(session, MembershipService(session)).cancel(
-                    self.user_id, booking.id
+            with self.assertRaises(AppError):
+                await BookingService(MembershipService()).cancel(
+                    session, [], self.user_id, booking.id
                 )
 
     async def test_check_in_refused_outside_the_window(self):
@@ -231,15 +224,15 @@ class BookingServiceTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
         self.now.return_value = booking.starts_at - timedelta(hours=1)
         async with self.sessions() as session:
-            with self.assertRaisesRegex(BookingStateError, "check-in opens at"):
-                await BookingService(session, MembershipService(session)).check_in(
-                    self.user_id, booking.id
+            with self.assertRaisesRegex(AppError, "check-in opens at"):
+                await BookingService(MembershipService()).check_in(
+                    session, self.user_id, booking.id
                 )
         self.now.return_value = booking.starts_at + timedelta(minutes=30)
         async with self.sessions() as session:
-            with self.assertRaisesRegex(BookingStateError, "check-in has closed"):
-                await BookingService(session, MembershipService(session)).check_in(
-                    self.user_id, booking.id
+            with self.assertRaisesRegex(AppError, "check-in has closed"):
+                await BookingService(MembershipService()).check_in(
+                    session, self.user_id, booking.id
                 )
         async with self.sessions() as session:
             unchanged = await session.get(Booking, booking.id)

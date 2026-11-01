@@ -49,7 +49,9 @@ class BookingContextBuilder:
 
     async def with_membership(self, memberships: MembershipService) -> Self:
         """Load the member's current membership with its plan and entitlements."""
-        self.membership = await memberships.booking_membership(self.user_id, self.now.date())
+        self.membership = await memberships.booking_membership(
+            self.db, self.user_id, self.now.date()
+        )
         self.membership_loaded = True
         return self
 

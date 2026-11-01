@@ -1,14 +1,14 @@
 import os
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.core.exceptions import AppError
 from app.models.auth import User, UserRole
 from app.models.memberships import MembershipEntitlement, MembershipPlan, PlanEntitlement
-from app.modules.memberships.service import PlanNameTakenError, PlanNotFoundError
 from app.shared.constants import (
     MAX_BOOKING_WINDOW_DAYS,
     MAX_PLAN_DURATION_DAYS,
@@ -67,8 +67,8 @@ class PlanManagementApiTests(unittest.TestCase):
         # Import the router with test-only settings; overridden dependencies never connect.
         with patch.dict(os.environ, TEST_ENVIRONMENT):
             from app.modules.auth.dependencies import get_current_user
-            from app.modules.memberships.endpoints.v1 import router
             from app.modules.memberships.dependencies import get_membership_service
+            from app.modules.memberships.endpoints.v1 import router
         self.service = AsyncMock()
         self.service.create_plan.return_value = stored_plan()
         self.service.update_plan.return_value = stored_plan(weekly_booking_limit=6)
@@ -84,6 +84,7 @@ class PlanManagementApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.service.create_plan.assert_awaited_once_with(
+            ANY,
             name="Student",
             price_minor=2500,
             currency="EUR",
@@ -145,7 +146,7 @@ class PlanManagementApiTests(unittest.TestCase):
         self.assertEqual(sent["booking_window_days"], MAX_BOOKING_WINDOW_DAYS)
 
     def test_duplicate_name_is_a_conflict(self):
-        self.service.create_plan.side_effect = PlanNameTakenError("taken")
+        self.service.create_plan.side_effect = AppError("taken", 409)
 
         response = self.client.post("/memberships/plans", json=NEW_PLAN)
 
@@ -158,12 +159,12 @@ class PlanManagementApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.service.update_plan.assert_awaited_once_with(
-            4, entitlements=None, weekly_booking_limit=6
+            ANY, 4, entitlements=None, weekly_booking_limit=6
         )
         self.assertEqual(response.json()["weekly_booking_limit"], 6)
 
     def test_update_of_unknown_plan_is_not_found(self):
-        self.service.update_plan.side_effect = PlanNotFoundError("missing")
+        self.service.update_plan.side_effect = AppError("missing", 404)
 
         response = self.client.patch("/memberships/plans/99", json={"price_minor": 3000})
 
@@ -171,9 +172,9 @@ class PlanManagementApiTests(unittest.TestCase):
 
     def test_deactivate(self):
         self.assertEqual(self.client.delete("/memberships/plans/4").status_code, 204)
-        self.service.deactivate_plan.assert_awaited_once_with(4)
+        self.service.deactivate_plan.assert_awaited_once_with(ANY, 4)
 
-        self.service.deactivate_plan.side_effect = PlanNotFoundError("missing")
+        self.service.deactivate_plan.side_effect = AppError("missing", 404)
         self.assertEqual(self.client.delete("/memberships/plans/99").status_code, 404)
 
 

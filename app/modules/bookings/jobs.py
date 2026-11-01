@@ -41,9 +41,9 @@ async def expire_waitlist_offers(db: AsyncSession, now: datetime) -> int:
         )
     ).all()
     await db.rollback()
-    notifications = NotificationObserver(db)
+    notifications = NotificationObserver()
     publisher = NotificationPublisher(get_redis_client())
-    service = BookingService(db, MembershipService(db), notifications)
+    service = BookingService(MembershipService(), notifications)
     expired = 0
     for session_id in session_ids:
         timetable_session = await _lock_session(db, session_id)
@@ -68,9 +68,10 @@ async def expire_waitlist_offers(db: AsyncSession, now: datetime) -> int:
         ]
         for entry in lapsed:
             entry.status = WaitlistStatus.EXPIRED
-        await service.release_places(timetable_session, len(lapsed), now)
+        pending_notifications: list = []
+        await service.release_places(db, pending_notifications, timetable_session, len(lapsed), now)
         await db.commit()
-        await publisher.publish_many(notifications.drain())
+        await publisher.publish_many(pending_notifications)
         expired += len(lapsed)
     return expired
 
@@ -97,9 +98,9 @@ async def detect_no_shows(db: AsyncSession, now: datetime) -> int:
     for booking_id, session_id in candidates:
         by_session[session_id].append(booking_id)
 
-    notifications = NotificationObserver(db)
+    notifications = NotificationObserver()
     publisher = NotificationPublisher(get_redis_client())
-    service = BookingService(db, MembershipService(db), notifications)
+    service = BookingService(MembershipService(), notifications)
     marked = 0
     for session_id, booking_ids in by_session.items():
         timetable_session = await _lock_session(db, session_id)
@@ -116,9 +117,10 @@ async def detect_no_shows(db: AsyncSession, now: datetime) -> int:
         missed = [booking for booking in bookings if check_in_deadline(booking) <= now]
         for booking in missed:
             booking.status = BookingStatus.NO_SHOW
-        await service.release_places(timetable_session, len(missed), now)
+        pending_notifications: list = []
+        await service.release_places(db, pending_notifications, timetable_session, len(missed), now)
         await db.commit()
-        await publisher.publish_many(notifications.drain())
+        await publisher.publish_many(pending_notifications)
         marked += len(missed)
     return marked
 

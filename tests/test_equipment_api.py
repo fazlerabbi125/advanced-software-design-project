@@ -1,20 +1,16 @@
 import os
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.core.exceptions import AppError
 from app.models.auth import User, UserRole
 from app.models.facilities import EquipmentFault, EquipmentUnit, FaultStatus
 from app.modules.bookings.outages import CancelledBooking, MovedSlot, OutageOutcome
-from app.modules.facilities.service import (
-    EquipmentUnitNotFoundError,
-    FaultNotFoundError,
-    FaultStateError,
-    UnitNameTakenError,
-)
+from app.shared.pagination import PageMeta, PageResult
 from tests.settings import TEST_ENVIRONMENT
 from tests.test_booking_eligibility import NOW
 
@@ -57,11 +53,11 @@ class EquipmentApiTests(unittest.TestCase):
         # Import the router with test-only settings; overridden dependencies never connect.
         with patch.dict(os.environ, TEST_ENVIRONMENT):
             from app.modules.auth.dependencies import get_current_user
-            from app.modules.facilities.endpoints.v1 import router
             from app.modules.facilities.dependencies import (
                 get_facilities_service,
                 get_outage_handler,
             )
+            from app.modules.facilities.endpoints.v1 import router
         self.service = AsyncMock()
         self.outages = AsyncMock()
         self.current_user = User(id=STAFF_ID, role=UserRole.STAFF)
@@ -75,14 +71,18 @@ class EquipmentApiTests(unittest.TestCase):
     def test_members_report_faults_but_cannot_manage_them(self):
         self.current_user = User(id=MEMBER_ID, role=UserRole.MEMBER)
         self.service.report_fault.return_value = fault()
-        self.service.list_units.return_value = [unit()]
+        self.service.list_units.return_value = PageResult(
+            [unit()], PageMeta(page=1, limit=20, total_pages=1, total_count=1)
+        )
 
         report = self.client.post(
             "/equipment/2/faults", json={"description": "  The safety catch is bent "}
         )
         self.assertEqual(report.status_code, 201)
-        self.service.report_fault.assert_awaited_once_with(2, MEMBER_ID, "The safety catch is bent")
-        self.assertEqual(self.client.get("/equipment").json()[0]["name"], "Squat Rack 2")
+        self.service.report_fault.assert_awaited_once_with(
+            ANY, 2, MEMBER_ID, "The safety catch is bent"
+        )
+        self.assertEqual(self.client.get("/equipment").json()["items"][0]["name"], "Squat Rack 2")
 
         staff_only = (
             self.client.post("/equipment", json={"name": "Rack 9", "equipment_type": "squat rack"}),
@@ -94,10 +94,12 @@ class EquipmentApiTests(unittest.TestCase):
         self.assertEqual([item.status_code for item in staff_only], [403] * 5)
 
     def test_staff_filter_faults_by_status(self):
-        self.service.list_faults.return_value = [fault()]
+        self.service.list_faults.return_value = PageResult(
+            [fault()], PageMeta(page=1, limit=20, total_pages=1, total_count=1)
+        )
         response = self.client.get("/equipment/faults?status=reported")
         self.assertEqual(response.status_code, 200)
-        self.service.list_faults.assert_awaited_once_with(FaultStatus.REPORTED)
+        self.service.list_faults.assert_awaited_once_with(ANY, ANY, FaultStatus.REPORTED)
         self.assertEqual(self.client.get("/equipment/faults?status=broken").status_code, 422)
 
     def test_report_validation_and_unknown_unit(self):
@@ -106,7 +108,7 @@ class EquipmentApiTests(unittest.TestCase):
                 self.assertEqual(
                     self.client.post("/equipment/2/faults", json=body).status_code, 422
                 )
-        self.service.report_fault.side_effect = EquipmentUnitNotFoundError("missing")
+        self.service.report_fault.side_effect = AppError("missing", 404)
         response = self.client.post("/equipment/99/faults", json={"description": "Broken"})
         self.assertEqual(response.status_code, 404)
 
@@ -125,7 +127,7 @@ class EquipmentApiTests(unittest.TestCase):
         self.assertEqual(body["fault"]["status"], "confirmed")
         self.assertEqual(body["moved_slots"][0]["to_unit"], "Squat Rack 2")
         self.assertEqual(body["cancelled_bookings"][0]["booking_id"], 9)
-        self.service.save.assert_awaited_once_with(confirmed)
+        self.outages.handle.assert_awaited_once_with(ANY, ANY, ANY)
 
     def test_fault_errors(self):
         for method, path in (
@@ -134,9 +136,9 @@ class EquipmentApiTests(unittest.TestCase):
             ("resolve_fault", "resolve"),
         ):
             with self.subTest(path=path):
-                getattr(self.service, method).side_effect = FaultNotFoundError("missing")
+                getattr(self.service, method).side_effect = AppError("missing", 404)
                 self.assertEqual(self.client.post(f"/equipment/faults/7/{path}").status_code, 404)
-                getattr(self.service, method).side_effect = FaultStateError("wrong state")
+                getattr(self.service, method).side_effect = AppError("wrong state", 409)
                 self.assertEqual(self.client.post(f"/equipment/faults/7/{path}").status_code, 409)
         self.outages.handle.assert_not_awaited()
 
@@ -147,9 +149,9 @@ class EquipmentApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201)
         self.service.register_unit.assert_awaited_once_with(
-            "Squat Rack 2", "Squat rack", "gym_floor"
+            ANY, "Squat Rack 2", "Squat rack", "gym_floor"
         )
-        self.service.register_unit.side_effect = UnitNameTakenError("taken")
+        self.service.register_unit.side_effect = AppError("taken", 409)
         response = self.client.post(
             "/equipment", json={"name": "Squat Rack 2", "equipment_type": "squat rack"}
         )

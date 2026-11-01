@@ -3,8 +3,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Final, Literal
 
-from pydantic import Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AnyHttpUrl, Field, SecretStr
+from pydantic_settings import BaseSettings
 from sqlalchemy import URL
 
 from app.shared.constants import (
@@ -14,16 +14,11 @@ from app.shared.constants import (
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=Path(__file__).resolve().parents[2] / ".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
-
     app_name: str = "BFS Gym API"
     app_host: str = "127.0.0.1"
     app_port: int = 8000
     enable_debug: bool = False
+    database_driver: Final[str] = "postgresql+asyncpg"
     postgres_host: str
     postgres_port: int = 5432
     postgres_db: str
@@ -36,7 +31,7 @@ class Settings(BaseSettings):
     jwt_issuer: str | None = None
     jwt_audience: str | None = None
     jwt_access_expiration: int = int(timedelta(minutes=15).total_seconds())
-    jwt_refresh_expiration: int = int(timedelta(weeks=3).total_seconds())
+    jwt_refresh_expiration: int = int(timedelta(days=7).total_seconds())
     cors_allow_origins: list[str] = Field(default_factory=list)
     upload_root: Path
     biometric_image_max_bytes: int = MAX_BIOMETRIC_IMAGE_BYTES
@@ -59,14 +54,13 @@ class Settings(BaseSettings):
     stripe_secret_key: SecretStr
     stripe_webhook_secret: SecretStr
     payment_provider: Literal["stripe"] = "stripe"
-    # URLs Stripe redirects the member to after checkout completes or is abandoned.
-    stripe_success_url: str = "/docs#/memberships/purchase_membership"
-    stripe_cancel_url: str = "/docs#/memberships/purchase_membership"
+    stripe_success_url: AnyHttpUrl # e.g https://example.com/docs
+    stripe_cancel_url: AnyHttpUrl | None = None
 
     @property
     def sqlalchemy_url(self) -> URL:
         return URL.create(
-            drivername="postgresql+asyncpg",
+            drivername=self.database_driver,
             username=self.postgres_user,
             password=self.postgres_password.get_secret_value(),
             host=self.postgres_host,

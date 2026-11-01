@@ -19,7 +19,7 @@ def upgrade() -> None:
     op.execute(
         "UPDATE member_profiles "
         "SET biometric_template_id = "
-        "(md5(random()::text || clock_timestamp()::text || id::text))::uuid "
+        "gen_random_uuid() "
         "WHERE biometric_template_id IS NULL"
     )
     op.alter_column("member_profiles", "biometric_template_id", nullable=False)

@@ -1,18 +1,18 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from app.core.dependencies import DbSessionDep
+from app.core.exceptions import AppError, http_error
 from app.models.auth import UserRole
 from app.modules.auth.dependencies import CurrentUser, require_roles
-from app.modules.facilities.service import EquipmentUnitNotFoundError
-from app.modules.timetable_sessions.dependencies import TimetableServiceDependency
+from app.modules.timetable_sessions.dependencies import TimetableServiceDep
 from app.modules.timetable_sessions.schemas import (
     CreateSessionRequest,
     GenerateEquipmentSlotsRequest,
     SessionResponse,
 )
-from app.modules.timetable_sessions.service import EquipmentUnavailableError
+from app.shared.pagination import CursorParamsDep, CursorResponse
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -26,19 +26,16 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 async def create_session(
     payload: CreateSessionRequest,
     session: DbSessionDep,
-    service: TimetableServiceDependency,
+    service: TimetableServiceDep,
     _: Annotated[object, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
 ) -> Any:
     try:
-        timetable_session = await service.create(payload)
+        timetable_session = await service.create(session, payload)
         await session.commit()
         return timetable_session
-    except EquipmentUnitNotFoundError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except EquipmentUnavailableError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
@@ -53,26 +50,31 @@ async def create_session(
 async def generate_equipment_slots(
     payload: GenerateEquipmentSlotsRequest,
     session: DbSessionDep,
-    service: TimetableServiceDependency,
+    service: TimetableServiceDep,
     _: Annotated[object, Depends(require_roles(UserRole.STAFF, UserRole.MANAGER))],
 ) -> Any:
     try:
-        slots = await service.generate_equipment_slots(payload)
+        slots = await service.generate_equipment_slots(session, payload)
         await session.commit()
         return slots
-    except EquipmentUnitNotFoundError as error:
+    except AppError as error:
         await session.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
-    except EquipmentUnavailableError as error:
-        await session.rollback()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+        raise http_error(error) from error
     except Exception:
         await session.rollback()
         raise
 
 
 @router.get(
-    "", response_model=list[SessionResponse], description="List upcoming timetable sessions."
+    "",
+    response_model=CursorResponse[SessionResponse],
+    description="List upcoming timetable sessions.",
 )
-async def list_upcoming_sessions(_: CurrentUser, service: TimetableServiceDependency) -> Any:
-    return await service.upcoming()
+async def list_upcoming_sessions(
+    _: CurrentUser,
+    session: DbSessionDep,
+    service: TimetableServiceDep,
+    params: CursorParamsDep,
+) -> Any:
+    result = await service.upcoming(session, params)
+    return {"items": result.items, "meta": result.meta}

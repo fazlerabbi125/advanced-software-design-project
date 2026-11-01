@@ -13,12 +13,10 @@ behaves differently depending on the state the membership is in.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date, timedelta
+from http import HTTPStatus
 
+from app.core.exceptions import AppError
 from app.models.memberships import Membership, MembershipStatus
-
-
-class MembershipActionError(ValueError):
-    """Raised when an action is not allowed in the membership's current state."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,13 +30,13 @@ class MembershipState(ABC):
 
     @abstractmethod
     def cancel(self, membership: Membership) -> None:
-        """Cancel the membership, or raise MembershipActionError if not allowed."""
+        """Cancel the membership, or raise AppError if not allowed."""
 
     @abstractmethod
     def renewal_terms(
         self, membership: Membership, duration_days: int, today: date
     ) -> RenewalTerms:
-        """Work out the new dates for a renewal, or raise MembershipActionError.
+        """Work out the new dates for a renewal, or raise AppError.
 
         This only calculates; the caller takes payment and then applies the terms,
         so nothing changes if the payment fails.
@@ -67,7 +65,7 @@ class ExpiredState(MembershipState):
     status = MembershipStatus.EXPIRED
 
     def cancel(self, membership: Membership) -> None:
-        raise MembershipActionError("an expired membership cannot be cancelled")
+        raise AppError("an expired membership cannot be cancelled", HTTPStatus.CONFLICT)
 
     def renewal_terms(
         self, membership: Membership, duration_days: int, today: date
@@ -76,30 +74,30 @@ class ExpiredState(MembershipState):
         return RenewalTerms(starts_on=today, ends_on=today + timedelta(days=duration_days - 1))
 
 
-
 class PendingState(MembershipState):
     status = MembershipStatus.PENDING
 
     def cancel(self, membership: Membership) -> None:
-        membership.status = MembershipStatus.CANCELLED
+        raise AppError("a pending membership cannot be cancelled", HTTPStatus.CONFLICT)
 
     def renewal_terms(
         self, membership: Membership, duration_days: int, today: date
     ) -> RenewalTerms:
-        raise MembershipActionError("A pending membership cannot be renewed")
+        raise AppError("a pending membership cannot be renewed", HTTPStatus.CONFLICT)
 
 
 class CancelledState(MembershipState):
     status = MembershipStatus.CANCELLED
 
     def cancel(self, membership: Membership) -> None:
-        raise MembershipActionError("this membership is already cancelled")
+        raise AppError("this membership is already cancelled", HTTPStatus.CONFLICT)
 
     def renewal_terms(
         self, membership: Membership, duration_days: int, today: date
     ) -> RenewalTerms:
-        raise MembershipActionError(
-            "a cancelled membership cannot be renewed, please buy a new plan instead"
+        raise AppError(
+            "a cancelled membership cannot be renewed, please buy a new plan instead",
+            HTTPStatus.CONFLICT,
         )
 
 
@@ -107,6 +105,7 @@ ACTIVE = ActiveState()
 EXPIRED = ExpiredState()
 CANCELLED = CancelledState()
 PENDING = PendingState()
+
 
 def state_of(membership: Membership, today: date) -> MembershipState:
     """The membership's current state. A membership past its end date counts as

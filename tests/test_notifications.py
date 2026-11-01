@@ -26,22 +26,22 @@ def make_notification(*, notification_id: int = 1) -> Notification:
 
 
 class NotificationObserverTests(unittest.IsolatedAsyncioTestCase):
-    async def test_observer_flushes_a_durable_event_and_drains_once(self) -> None:
+    async def test_observer_flushes_a_durable_event_and_returns_it(self) -> None:
         session = MagicMock()
         session.flush = AsyncMock()
-        observer = NotificationObserver(session)
+        observer = NotificationObserver()
         event = NotificationEvent(
             user_id=uuid4(),
             event_type=NotificationType.BOOKING_CONFIRMED,
             payload={"booking_id": 42},
         )
 
-        notification = await observer.observe(event)
+        pending: list[Notification] = []
+        notification = await observer.observe(session, pending, event)
 
         session.add.assert_called_once_with(notification)
         session.flush.assert_awaited_once()
-        self.assertEqual(observer.drain(), [notification])
-        self.assertEqual(observer.drain(), [])
+        self.assertEqual(pending, [notification])
 
 
 class NotificationPublisherTests(unittest.IsolatedAsyncioTestCase):
@@ -74,16 +74,16 @@ class NotificationFeedTests(unittest.IsolatedAsyncioTestCase):
     async def test_stream_replays_unread_then_forwards_live_notification(self) -> None:
         unread = make_notification(notification_id=10)
         live = make_notification(notification_id=11)
-        pubsub = FakePubSub(
-            {"type": "message", "data": NotificationPublisher.payload(live)}
-        )
+        pubsub = FakePubSub({"type": "message", "data": NotificationPublisher.payload(live)})
         redis = MagicMock()
         redis.pubsub.return_value = pubsub
-        feed = NotificationFeed(MagicMock(), redis)
+        session = MagicMock()
+        session.rollback = AsyncMock()
+        feed = NotificationFeed(redis)
         feed.unread_for_user = AsyncMock(return_value=[unread])
         disconnected = AsyncMock(side_effect=[False, True])
 
-        stream = feed.stream(unread.user_id, disconnected)
+        stream = feed.stream(session, unread.user_id, disconnected)
         replay = await anext(stream)
         forwarded = await anext(stream)
         await stream.aclose()
@@ -94,6 +94,7 @@ class NotificationFeedTests(unittest.IsolatedAsyncioTestCase):
         pubsub.subscribe.assert_awaited_once_with(f"notify:user:{unread.user_id}")
         pubsub.unsubscribe.assert_awaited_once_with(f"notify:user:{unread.user_id}")
         pubsub.aclose.assert_awaited_once()
+        session.rollback.assert_awaited_once()
 
 
 if __name__ == "__main__":

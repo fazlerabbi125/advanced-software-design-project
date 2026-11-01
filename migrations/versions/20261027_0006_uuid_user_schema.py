@@ -58,9 +58,7 @@ def upgrade() -> None:
     )
     op.execute("ALTER INDEX ix_sessions_starts_at RENAME TO ix_timetable_sessions_starts_at")
     op.alter_column("bookings", "session_id", new_column_name="timetable_session_id")
-    op.execute(
-        "ALTER INDEX ix_bookings_session_id RENAME TO ix_bookings_timetable_session_id"
-    )
+    op.execute("ALTER INDEX ix_bookings_session_id RENAME TO ix_bookings_timetable_session_id")
 
     # Create profile fields before making name mandatory, retaining a safe value for old rows.
     op.add_column("member_profiles", sa.Column("name", sa.String(length=200), nullable=True))
