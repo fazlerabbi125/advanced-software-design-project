@@ -34,21 +34,160 @@ The business rules include membership plans with configurable booking windows an
 - Member biometric photo upload with local image-quality and single-face validation.
 - Durable in-app notifications, Redis Pub/Sub delivery, and authenticated SSE streaming.
 
-## Design Patterns
+## Design Patterns Used
 
-| Pattern | Where it is used | Status |
-|---|---|---|
-| **Strategy** | `GymFloorPolicy` and `VipAreaPolicy` in `app/modules/access/policies.py` — zone access policies | ✅ Implemented |
-| **Chain of Responsibility** | Booking eligibility rules in `app/modules/bookings/eligibility.py` — collect all validation failures | ✅ Implemented |
-| **Chain of Responsibility (Vision)** | `PhotoValidationHandler` chain in `app/modules/members/photo_validation.py` — checks image type, resolution, illumination, blur, and exactly one face | ✅ Implemented |
-| **Factory Method** | `PaymentGatewayFactory.create(settings)` in `app/modules/memberships/payment_gateway.py` — payment provider factory | ✅ Implemented |
-| **Observer** | `NotificationObserver` + `NotificationPublisher` in `app/modules/notifications/` — durable domain events push live notifications | ✅ Implemented |
-| **State** | `ActiveState`, `ExpiredState`, `CancelledState` in `app/modules/memberships/states.py` — membership lifecycle | ✅ Implemented |
-| **Builder** | `BookingContextBuilder` in `app/modules/bookings/builder.py` — assembles complex `BookingContext` for Chain of Responsibility | ✅ Implemented |
+The patterns below are intentional parts of the application design, rather than
+names applied to every framework feature. The role names use the course/GoF
+terminology. A class can play more than one practical role, but each mapping below
+identifies the important collaboration in the code.
+
+### Strategy — choose an access rule without changing the check-in workflow
+
+**Intent:** encapsulate interchangeable behaviours behind one interface. This keeps
+`AccessService` from growing a large `if`/`elif` block for every type of gym zone.
+
+- **Strategy:** `AccessPolicy` in `app/modules/access/policies.py` defines the
+  common `check(...)` operation.
+- **ConcreteStrategy:** `GymFloorPolicy` and `VipAreaPolicy` implement the rule for
+  their respective zone types.
+- **Context:** `AccessService` in `app/modules/access/access_service.py` selects the
+  policy for the requested `AccessZone` and delegates the access decision to it.
+- **Collaboration:** `build_policies(...)` assembles the zone-to-strategy mapping.
+  Adding a new access rule means implementing `AccessPolicy` and registering it,
+  instead of rewriting the check-in operation.
+
+### Chain of Responsibility — run a sequence of independent checks
+
+**Intent:** pass one request through a chain of handlers. Each handler owns one
+rule, then forwards the request to its successor. This project deliberately collects
+all booking failures instead of stopping at the first one.
+
+- **Handler:** `EligibilityRule` in `app/modules/bookings/eligibility.py` provides
+  `handle(...)`, a `check(...)` hook, and the successor link.
+- **ConcreteHandler:** rules such as `ActiveMembershipRule`, `EntitlementRule`,
+  `BookingWindowRule`, and `WeeklyLimitRule` each check one eligibility condition.
+- **Client:** `BookingService` builds a `BookingContext` and sends it to the first
+  handler returned by `build_eligibility_chain(...)`.
+- **Outcome:** a member can see, for example, both an unavailable plan entitlement
+  and a weekly-limit problem in one response.
+
+The biometric-photo validator uses the same pattern for a different problem:
+`PhotoValidationHandler` is the **Handler** and `ImageTypeHandler`,
+`ReadabilityHandler`, `ImageQualityHandler`, and `SingleFaceHandler` are the
+**ConcreteHandlers**. `PhotoValidator` creates the chain and is its **Client**.
+The ordered checks reject an unsuitable upload before later checks need to process it.
+
+### Factory Method — centralise payment-gateway creation
+
+**Intent:** let client code depend on a product interface instead of directly
+constructing a provider-specific object.
+
+- **Product:** the abstract `PaymentGateway` in
+  `app/modules/memberships/payment_gateway.py`.
+- **ConcreteProduct:** `StripeCheckoutGateway`, which implements Stripe Checkout.
+- **Creator / factory method:** `PaymentGatewayFactory.create(settings)` chooses and
+  creates the configured gateway.
+- **Client:** application startup calls the factory once and membership services use
+  the returned `PaymentGateway` contract.
+
+This acts as a dependency firewall: adding another provider changes the factory and
+adds a new concrete product, rather than changing each service that takes payment.
+
+### Observer — record and publish membership and booking events
+
+**Intent:** let an event source notify interested work without tightly coupling the
+source to the delivery mechanism.
+
+- **Subject-like event sources:** booking, membership, and payment services create
+  `NotificationEvent` values when their domain action succeeds.
+- **Observer / ConcreteObserver:** `NotificationObserver.observe(...)` in
+  `app/modules/notifications/service.py` records the event as a durable
+  `Notification` in the current database transaction.
+- **Notification delivery collaborator:** after a successful commit,
+  `NotificationPublisher` publishes the saved notifications on a user-specific
+  Redis channel; `NotificationFeed` exposes them to the member through SSE.
+
+This is an application-specific publish/subscribe adaptation of Observer. Unlike a
+textbook `Subject` that keeps an in-memory observer list, events are made durable
+first and live delivery happens only after the transaction succeeds. That avoids
+notifying a member about a change that is later rolled back.
+
+### State — make membership actions depend on lifecycle state
+
+**Intent:** represent state-specific behaviour in separate objects instead of
+spreading status checks throughout a service.
+
+- **State:** `MembershipState` in `app/modules/memberships/states.py` defines the
+  operations that vary by state: `cancel(...)` and `renewal_terms(...)`.
+- **ConcreteState:** `ActiveState`, `ExpiredState`, `PendingState`, and
+  `CancelledState` implement the allowed behaviour for each lifecycle state.
+- **Context / client:** `MembershipService` asks `state_of(membership, today)` for
+  the current state and delegates the requested action to it.
+
+For example, an active membership can be cancelled or renewed, while a pending
+membership rejects both actions. The state object is selected from the persisted
+membership status when needed, rather than stored as a long-lived object on the ORM
+model.
+
+### Builder — assemble a complete booking snapshot step by step
+
+**Intent:** construct a complex object in clear steps, then return it only when it
+is complete.
+
+- **Builder:** `BookingContextBuilder` in `app/modules/bookings/builder.py` loads
+  the timetable session, membership, weekly bookings, no-show status, and equipment
+  usage through fluent `with_...` methods.
+- **Product:** immutable `BookingContext`, the data required by the booking
+  eligibility chain.
+- **Director / client:** `BookingService._build_context(...)` chooses the build
+  steps, then calls `build()` before running the eligibility handlers.
+
+The builder keeps data-gathering details out of the booking operation and prevents a
+partially populated context from reaching the business rules.
+
+### Interceptor — apply cross-cutting CORS handling in the request pipeline
+
+**Intent:** allow a framework to run an out-of-band service at defined processing
+points without changing every endpoint. Here the cross-cutting concern is browser
+cross-origin policy, not gym business logic.
+
+- **Concrete Framework:** FastAPI/Starlette provides the HTTP request-processing
+  pipeline.
+- **Dispatcher:** the framework's middleware stack calls registered middleware for
+  each request and response.
+- **ConcreteInterceptor:** FastAPI's `CORSMiddleware` handles CORS preflight
+  requests and adds CORS headers for origins allowed by its configuration.
+- **Application:** `app/main.py` registers the interceptor with
+  `app.add_middleware(...)`; debug mode and production mode supply different CORS
+  settings.
+
+This is a framework-provided Interceptor use, rather than a custom BFS Gym
+interceptor hierarchy. It keeps the endpoint handlers focused on API operations
+instead of repeating CORS policy logic.
+
+### Decorator — wrap the HTTP application with CORS behaviour
+
+**Intent:** attach a responsibility to an object by wrapping it, instead of changing
+the wrapped object's implementation. The wrapper keeps the same interface and
+delegates the work it does not own to the wrapped component.
+
+- **Component / ConcreteComponent:** the FastAPI application is the inner ASGI
+  application that receives HTTP requests.
+- **Decorator / ConcreteDecorator:** FastAPI's `CORSMiddleware` wraps that
+  application when `app.add_middleware(...)` is called in `app/main.py`.
+- **Collaboration:** the middleware receives the same ASGI call shape as the
+  application, handles CORS preflight requests, adds allowed-origin headers, and
+  delegates normal request processing to the application it wraps.
+
+The same middleware therefore has two useful views: structurally it is a Decorator
+around the application, while operationally it is an Interceptor at the HTTP request
+processing point. Python `@...` syntax is also used in the codebase, but those
+language-level decorators are separate from this GoF Decorator collaboration.
+
 
 ## Architecture
 
-The project follows a **monolithic MVC/REST architecture**:
+The project follows a **modular monolithic MVC/REST architecture**:
 
 - **Models** (`app/models/`) — SQLAlchemy ORM models define the database schema.
 - **Services** (`app/modules/*/service.py`, `app/modules/*/*_service.py`) — contain all business logic; routers never query the database directly.
@@ -417,12 +556,7 @@ uv run ruff format --check .
 |---|---|
 | Scenario narrative | Report section 1 |
 | Use-case diagrams | Report section 3, UML artefacts |
-| Strategy pattern | `app/modules/access/policies.py` |
-| Chain of Responsibility pattern | `app/modules/bookings/eligibility.py` |
-| Factory Method pattern | `app/modules/memberships/payment_gateway.py` |
-| Observer pattern | `app/modules/notifications/` |
-| State pattern | `app/modules/memberships/states.py` |
-| Builder pattern | `app/modules/bookings/builder.py` |
+| Design-pattern roles and code mapping | [Design Patterns Used](#design-patterns-used) |
 | Automated tests | `tests/` directory (Unit, Integration, and DB tests) |
 | CI/CD | `.github/workflows/ci.yml` (Lint, DB Integration Tests, Metrics) |
 | Metrics + refactoring | `BookingService.create` refactored (complexity 10 -> 2), Radon CI job |
