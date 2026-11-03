@@ -1,13 +1,16 @@
 """Membership lifecycle, using the State pattern.
 
-A membership is Active, Expired or Cancelled. Each state is its own class, and the
-service asks the membership's current state what is allowed instead of checking the
-status with if/else in many places. The same action (renew, cancel) therefore
-behaves differently depending on the state the membership is in.
+A membership is Pending, Active, Expired or Cancelled. Each state is its own
+class, and the service asks the membership's current state what is allowed
+instead of checking the status with if/else in many places. The same action
+(renew, cancel) therefore behaves differently depending on the state.
 
-    Active --(end date passes)--> Expired --(renew)--> Active
+    Pending --(payment confirmed)--> Active
+    Pending --(payment failed or checkout expired)--> Cancelled
+    Active --(end date passes)--> Expired
     Active --(cancel)--> Cancelled
-    Active --(renew)--> Active, with the end date pushed back
+    Active or Expired --(renew)--> new Pending membership; the old one is
+        cancelled once the new one is paid
 """
 
 from abc import ABC, abstractmethod
