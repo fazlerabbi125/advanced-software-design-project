@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import unittest
@@ -75,6 +76,35 @@ class FakePubSub:
         return message
 
 
+class TrackingPool:
+    def __init__(self) -> None:
+        self.in_use = 0
+
+
+class BlockingPubSub:
+    def __init__(self, pool: TrackingPool) -> None:
+        self.pool = pool
+        self.polling = asyncio.Event()
+        self.unsubscribe_started = asyncio.Event()
+        self.release_unsubscribe = asyncio.Event()
+        self.closed = asyncio.Event()
+
+    async def subscribe(self, _channel: str) -> None:
+        self.pool.in_use += 1
+
+    async def get_message(self, **_kwargs):
+        self.polling.set()
+        await asyncio.Event().wait()
+
+    async def unsubscribe(self, _channel: str) -> None:
+        self.unsubscribe_started.set()
+        await self.release_unsubscribe.wait()
+
+    async def aclose(self) -> None:
+        self.pool.in_use -= 1
+        self.closed.set()
+
+
 class ExpiringNotification:
     def __init__(self, state):
         self.state = state
@@ -110,6 +140,48 @@ class ExpiringNotification:
 
 
 class NotificationFeedTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_disconnect_releases_blocked_pubsub_connection(self) -> None:
+        pool = TrackingPool()
+        pubsub = BlockingPubSub(pool)
+        redis = MagicMock()
+        redis.pubsub.return_value = pubsub
+        session = MagicMock()
+        session.rollback = AsyncMock()
+        feed = NotificationFeed(redis)
+        feed.unread_for_user = AsyncMock(return_value=[])
+        stream = feed.stream(session, uuid4(), AsyncMock(return_value=False))
+        pending_event = asyncio.create_task(anext(stream))
+
+        await pubsub.polling.wait()
+        self.assertEqual(pool.in_use, 1)
+        pending_event.cancel()
+        await pubsub.unsubscribe_started.wait()
+        pending_event.cancel()
+        pubsub.release_unsubscribe.set()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await pending_event
+        await pubsub.closed.wait()
+        self.assertEqual(pool.in_use, 0)
+
+    async def test_stream_closes_pubsub_when_unsubscribe_fails(self) -> None:
+        notification = make_notification()
+        pubsub = FakePubSub(None)
+        pubsub.unsubscribe.side_effect = RuntimeError("unsubscribe failed")
+        redis = MagicMock()
+        redis.pubsub.return_value = pubsub
+        session = MagicMock()
+        session.rollback = AsyncMock()
+        feed = NotificationFeed(redis)
+        feed.unread_for_user = AsyncMock(return_value=[notification])
+        stream = feed.stream(session, notification.user_id, AsyncMock(return_value=True))
+
+        await anext(stream)
+        with self.assertRaisesRegex(RuntimeError, "unsubscribe failed"):
+            await stream.aclose()
+
+        pubsub.aclose.assert_awaited_once()
+
     async def test_stream_serializes_unread_notifications_before_rollback(self) -> None:
         state = {"expired": False}
         notification = ExpiringNotification(state)

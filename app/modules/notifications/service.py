@@ -138,5 +138,22 @@ class NotificationFeed:
                         raw_data=data, event="notification", id=str(notification_id)
                     )
         finally:
-            await pubsub.unsubscribe(NotificationPublisher.channel(user_id))
+            cleanup_task = asyncio.create_task(
+                self._close_pubsub(pubsub, NotificationPublisher.channel(user_id))
+            )
+            cancellation_requested = False
+            while not cleanup_task.done():
+                try:
+                    await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError:
+                    cancellation_requested = True
+            cleanup_task.result()
+            if cancellation_requested:
+                raise asyncio.CancelledError
+
+    @staticmethod
+    async def _close_pubsub(pubsub: Any, channel: str) -> None:
+        try:
+            await pubsub.unsubscribe(channel)
+        finally:
             await pubsub.aclose()
