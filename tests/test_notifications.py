@@ -1,8 +1,12 @@
 import json
+import os
 import unittest
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from inspect import isasyncgenfunction
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+from fastapi.sse import ServerSentEvent
 
 from app.models.notifications import Notification, NotificationType
 from app.modules.notifications.service import (
@@ -11,6 +15,7 @@ from app.modules.notifications.service import (
     NotificationObserver,
     NotificationPublisher,
 )
+from tests.settings import TEST_ENVIRONMENT
 
 
 def make_notification(*, notification_id: int = 1) -> Notification:
@@ -124,8 +129,9 @@ class NotificationFeedTests(unittest.IsolatedAsyncioTestCase):
         replay = await anext(stream)
         await stream.aclose()
 
-        self.assertIn("id: 12", replay)
-        self.assertIn('"booking_id":42', replay)
+        self.assertIsInstance(replay, ServerSentEvent)
+        self.assertEqual((replay.id, replay.event), ("12", "notification"))
+        self.assertEqual(json.loads(replay.raw_data or "")["payload"], {"booking_id": 42})
 
     async def test_stream_replays_unread_then_forwards_live_notification(self) -> None:
         unread = make_notification(notification_id=10)
@@ -144,13 +150,31 @@ class NotificationFeedTests(unittest.IsolatedAsyncioTestCase):
         forwarded = await anext(stream)
         await stream.aclose()
 
-        self.assertIn("id: 10", replay)
-        self.assertIn("id: 11", forwarded)
-        self.assertIn('"booking_id":42', forwarded)
+        self.assertEqual((replay.id, replay.event), ("10", "notification"))
+        self.assertEqual((forwarded.id, forwarded.event), ("11", "notification"))
+        self.assertEqual(json.loads(forwarded.raw_data or "")["payload"], {"booking_id": 42})
         pubsub.subscribe.assert_awaited_once_with(f"notify:user:{unread.user_id}")
         pubsub.unsubscribe.assert_awaited_once_with(f"notify:user:{unread.user_id}")
         pubsub.aclose.assert_awaited_once()
         session.rollback.assert_awaited_once()
+
+
+class NotificationEndpointTests(unittest.TestCase):
+    def test_stream_route_uses_fastapi_sse_generator(self) -> None:
+        with patch.dict(os.environ, TEST_ENVIRONMENT):
+            from fastapi.routing import APIRoute
+            from fastapi.sse import EventSourceResponse
+
+            from app.modules.notifications.endpoints.v1 import router
+
+        route = next(
+            item
+            for item in router.routes
+            if isinstance(item, APIRoute) and item.path == "/notifications/stream"
+        )
+
+        self.assertIs(route.response_class, EventSourceResponse)
+        self.assertTrue(isasyncgenfunction(route.endpoint))
 
 
 if __name__ == "__main__":

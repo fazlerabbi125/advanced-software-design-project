@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from fastapi.sse import ServerSentEvent
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import select
@@ -103,7 +104,7 @@ class NotificationFeed:
 
     async def stream(
         self, session: AsyncSession, user_id: UUID, is_disconnected: Any
-    ) -> AsyncIterator[str]:
+    ) -> AsyncIterator[ServerSentEvent]:
         pubsub = self.redis.pubsub()
         await pubsub.subscribe(NotificationPublisher.channel(user_id))
         try:
@@ -113,7 +114,9 @@ class NotificationFeed:
             ]
             await session.rollback()
             for payload, notification_id in unread:
-                yield self._sse(payload, notification_id)
+                yield ServerSentEvent(
+                    raw_data=payload, event="notification", id=str(notification_id)
+                )
             while not await is_disconnected():
                 try:
                     message = await pubsub.get_message(
@@ -122,9 +125,7 @@ class NotificationFeed:
                 except RedisError:
                     logger.exception("Notification SSE subscription failed for user_id=%s", user_id)
                     return
-                if message is None:
-                    yield ": keep-alive\n\n"
-                elif message["type"] == "message":
+                if message is not None and message["type"] == "message":
                     data = str(message["data"])
                     try:
                         notification_id = int(json.loads(data)["id"])
@@ -133,12 +134,9 @@ class NotificationFeed:
                             "Discarded malformed notification message for user_id=%s", user_id
                         )
                         continue
-                    yield self._sse(data, notification_id)
+                    yield ServerSentEvent(
+                        raw_data=data, event="notification", id=str(notification_id)
+                    )
         finally:
             await pubsub.unsubscribe(NotificationPublisher.channel(user_id))
             await pubsub.aclose()
-
-    @staticmethod
-    def _sse(data: str, notification_id: int | None = None) -> str:
-        prefix = f"id: {notification_id}\n" if notification_id is not None else ""
-        return f"{prefix}event: notification\ndata: {data}\n\n"
