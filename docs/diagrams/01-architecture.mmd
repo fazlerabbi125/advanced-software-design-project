@@ -1,0 +1,38 @@
+flowchart TB
+  subgraph clients["Clients (simulated)"]
+    direction LR
+    ui["Swagger / Postman"]
+    scan["Face scanner"]
+  end
+  subgraph app["FastAPI app"]
+    direction TB
+    web["Controllers<br/>routers per module"]
+    subgraph svc["Services (stateless)"]
+      direction LR
+      sShip["Membership<br/>State, Factory Method"] ~~~ sBook["Booking<br/>Builder, Chain of Resp."] ~~~ sAcc["Access<br/>Strategy"] ~~~ sOther["Auth, Members,<br/>Facilities, Timetable"]
+    end
+    notify["Notifications<br/>Observer"]
+    model["Model<br/>SQLAlchemy entities"]
+    sched["Scheduler<br/>APScheduler jobs"]
+  end
+  subgraph infra["Docker Compose"]
+    direction LR
+    pg[("PostgreSQL")]
+    cache[("Redis")]
+    files[("Image uploads")]
+    cli["Stripe CLI"]
+  end
+  stripe["Stripe Checkout"]
+
+  ui -->|"HTTPS + JWT"| web
+  scan -->|"device key"| web
+  web --> svc
+  sched --> svc
+  svc --> model
+  svc --> notify
+  model --> pg
+  svc --> cache
+  notify -->|"Pub/Sub, SSE"| cache
+  svc --> files
+  svc --> stripe
+  stripe -.->|"webhook"| cli

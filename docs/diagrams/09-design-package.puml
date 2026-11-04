@@ -1,0 +1,65 @@
+@startuml
+set separator none
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 13
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam packageStyle folder
+skinparam package {
+  BackgroundColor #FFFFFF
+  BorderColor #333333
+}
+
+package Presentation <<layer>> {
+  package app.api {
+  }
+  package "module endpoints" {
+  }
+}
+
+package Business <<layer>> {
+  package facilities {
+  }
+  package access <<Strategy>> {
+  }
+  package bookings <<Builder, Chain of Resp.>> {
+  }
+  package payments {
+  }
+  package memberships <<State, Factory Method>> {
+  }
+  package "booked-zone policies" <<planned>> #F4F4F4;line.dashed {
+  }
+  package notifications <<Observer>> {
+  }
+  package members <<Chain of Resp.>> {
+  }
+  package timetable_sessions {
+  }
+  package auth {
+  }
+}
+
+package Data <<layer>> {
+  package app.models {
+  }
+  package app.core {
+  }
+  package app.storage {
+  }
+}
+
+app.api ..> "module endpoints"
+Presentation ..> Business
+Business ..> Data
+
+facilities ..> bookings
+access ..> memberships
+access ..> "booked-zone policies"
+bookings ..> memberships
+bookings ..> notifications
+memberships ..> notifications
+payments ..> notifications
+"module endpoints" -[hidden]-> members
+notifications -[hidden]-> app.core
+@enduml

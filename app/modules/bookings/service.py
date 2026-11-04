@@ -522,6 +522,7 @@ class BookingService:
         booking: Booking,
         event_type: NotificationType,
     ) -> None:
+        await session.flush()
         await self._record(
             session,
             pending_notifications,

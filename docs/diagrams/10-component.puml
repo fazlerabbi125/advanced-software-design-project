@@ -1,0 +1,66 @@
+@startuml
+set separator none
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 13
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam componentStyle uml2
+skinparam component {
+  BackgroundColor #FFFFFF
+  BorderColor #333333
+}
+skinparam interface {
+  BackgroundColor #FFFFFF
+  BorderColor #333333
+}
+
+component "Swagger / Postman" as Client
+component "Face scanner" as Scanner
+
+component "BFS Gym API" as API {
+  portin "REST API" as REST
+  component Controllers
+  component Members
+  component "Photo validation" as PhotoVal
+  component Memberships
+  component Bookings
+  component Access
+  component "Stripe webhook" as Webhook
+  component Notifications
+  component Scheduler
+  component "Stripe Checkout gateway" as Gateway
+  interface PaymentGateway
+  interface NotificationObserver
+}
+
+database PostgreSQL
+database "Redis" as Redis
+cloud "Stripe" as Stripe
+
+Client --> REST : HTTP / SSE
+Scanner --> REST : HTTP + device key
+Stripe --> REST : webhook\n(via Stripe CLI)
+REST --> Controllers
+
+Controllers -left-> Members
+Members -down-> PhotoVal : check upload
+Controllers --> Memberships
+Controllers --> Bookings
+Controllers --> Access
+Controllers --> Webhook
+Scheduler --> Bookings : every minute
+
+Memberships -right-( PaymentGateway
+PaymentGateway -down- Gateway
+Gateway --> Stripe : HTTPS
+
+Memberships --( NotificationObserver
+Bookings --( NotificationObserver
+Webhook --( NotificationObserver
+NotificationObserver -down- Notifications
+
+Access --> Memberships : entitlement check
+Notifications --> Redis : Pub/Sub
+Access --> Redis : occupancy
+API --> PostgreSQL : SQL
+@enduml

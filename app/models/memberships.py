@@ -92,6 +92,9 @@ class Membership(Base, IdMixin, TimestampMixin):
     ends_on: Mapped[date] = mapped_column(sa.Date, index=True)
     payment_reference: Mapped[str | None] = mapped_column(sa.String(255), unique=True)
     stripe_session_id: Mapped[str | None] = mapped_column(sa.String(255), unique=True)
+    renewed_from_membership_id: Mapped[int | None] = mapped_column(
+        sa.ForeignKey("memberships.id", ondelete="SET NULL")
+    )
     user: Mapped[User] = relationship(back_populates="memberships")
     plan: Mapped[MembershipPlan] = relationship(back_populates="memberships")
     stripe_events: Mapped[list[StripeEvent]] = relationship(

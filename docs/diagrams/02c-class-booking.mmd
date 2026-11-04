@@ -1,0 +1,90 @@
+classDiagram
+  direction TB
+  class BookingService {
+    +create(userId: UUID, sessionId: int) Booking
+    +cancel(userId: UUID, bookingId: int) Booking
+    +acceptOffer(userId: UUID, entryId: int) Booking
+    +releasePlaces(session: TimetableSession, count: int, now: datetime) void
+    +checkIn(userId: UUID, bookingId: int) Booking
+    +listForUser(userId: UUID) List~Booking~
+  }
+  class BookingJobs {
+    <<module>>
+    +expireWaitlistOffers(db, now: datetime) int
+    +detectNoShows(db, now: datetime) int
+  }
+  class BookingContextBuilder {
+    +withSession(session: TimetableSession) BookingContextBuilder
+    +withMembership(memberships: MembershipService) BookingContextBuilder
+    +withWeeklyBookings() BookingContextBuilder
+    +withNoShowPenalties() BookingContextBuilder
+    +withEquipmentUsage() BookingContextBuilder
+    +build() BookingContext
+  }
+  class MembershipService {
+    +bookingMembership(userId: UUID, day: date) Membership
+  }
+  class EligibilityRule {
+    <<abstract>>
+    #successor: EligibilityRule [0..1]
+    +handle(context: BookingContext) List~EligibilityFailure~
+    #check(context: BookingContext) EligibilityFailure*
+  }
+  class BookingContext {
+    +now: datetime
+    +startsAt: datetime
+    +resourceType: BookingResourceType
+    +membership: Membership
+    +bookings: List~Booking~
+    +hasUnresolvedNoShows: bool
+    +equipmentSlotsThatDay: int
+  }
+  class EligibilityFailure {
+    +code: str
+    +message: str
+  }
+  class FutureSessionRule
+  class ActiveMembershipRule
+  class EntitlementRule
+  class BookingWindowRule
+  class WeeklyLimitRule
+  class SameStartRule
+  class EquipmentDailyCapRule
+  class NoShowPenaltyRule
+  class UnitOutageHandler {
+    +handle(unit: EquipmentUnit, now: datetime) OutageOutcome
+  }
+  class NotificationObserver {
+    +observe(pending: List~Notification~, event: NotificationEvent) Notification
+  }
+  class NotificationEvent {
+    +userId: UUID
+    +eventType: NotificationType
+    +payload: dict
+  }
+
+  BookingService ..> BookingContextBuilder : directs
+  BookingContextBuilder ..> MembershipService
+  BookingContextBuilder ..> BookingContext : creates
+  BookingService ..> EligibilityRule : builds chain
+  BookingJobs ..> BookingService : releasePlaces
+  EligibilityRule ..> BookingContext
+  EligibilityRule ..> EligibilityFailure : returns
+  EligibilityRule <|-- FutureSessionRule
+  EligibilityRule <|-- ActiveMembershipRule
+  EligibilityRule <|-- EntitlementRule
+  EligibilityRule <|-- BookingWindowRule
+  EligibilityRule <|-- WeeklyLimitRule
+  EligibilityRule <|-- SameStartRule
+  EligibilityRule <|-- EquipmentDailyCapRule
+  EligibilityRule <|-- NoShowPenaltyRule
+  BookingService --> "0..1" NotificationObserver : observer
+  BookingJobs ..> NotificationObserver
+  NotificationObserver ..> NotificationEvent : receives
+
+  note for EligibilityRule "pre: context is complete<br>post: returns every failure<br>from this rule onward;<br>writes nothing"
+  note for BookingContextBuilder "build() needs a<br>session and membership"
+  note for BookingJobs "Every minute: expire<br>offers, mark no-shows"
+  note for UnitOutageHandler "Fault confirmed: move slots<br>to a free unit, or cancel"
+  note for NotificationObserver "Saved with the change;<br>sent via Redis after commit"
+

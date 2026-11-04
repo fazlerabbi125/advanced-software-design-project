@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     stripe_secret_key: SecretStr
     stripe_webhook_secret: SecretStr
     payment_provider: Literal["stripe"] = "stripe"
-    stripe_success_url: AnyHttpUrl # e.g https://example.com/docs
+    stripe_success_url: AnyHttpUrl  # e.g https://example.com/docs
     stripe_cancel_url: AnyHttpUrl | None = None
 
     @property

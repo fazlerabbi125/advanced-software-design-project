@@ -1,0 +1,135 @@
+classDiagram
+  direction LR
+  class User {
+    -email: str
+    -passwordHash: str
+    +role: UserRole
+    +isActive: bool
+  }
+  class UserRole {
+    <<enumeration>>
+    MEMBER
+    STAFF
+    MANAGER
+  }
+  class MemberProfile {
+    +name: str
+    -phone: str
+    -dateOfBirth: date
+    -biometricTemplateId: UUID
+    -biometricImageKey: str
+    -biometricUploadedAt: datetime
+  }
+  class RefreshToken {
+    -jti: str
+    -familyId: str
+    -expiresAt: datetime
+    -revokedAt: datetime
+  }
+  class Membership {
+    +status: MembershipStatus
+    +startsOn: date
+    +endsOn: date
+    -paymentReference: str
+    -stripeSessionId: str
+    -renewedFrom: Membership [0..1]
+    +state(today: date) MembershipState
+  }
+  class MembershipPlan {
+    +name: str
+    +priceMinor: int
+    +currency: str
+    +durationDays: int
+    +bookingWindowDays: int
+    +weeklyBookingLimit: int
+    +isActive: bool
+  }
+  class PlanEntitlement {
+    +entitlement: MembershipEntitlement
+  }
+  class Booking {
+    +resourceName: str
+    +resourceType: BookingResourceType
+    +startsAt: datetime
+    +endsAt: datetime
+    +status: BookingStatus
+  }
+  class WaitlistEntry {
+    +status: WaitlistStatus
+    +offeredAt: datetime
+  }
+  class AccessLog {
+    +event: AccessEvent
+    +zone: AccessZone
+    +source: str
+    +occurredAt: datetime
+    +staffReason: str
+  }
+  class StripeEvent {
+    -stripeEventId: str
+  }
+  class DeniedAccessAttempt {
+    -biometricTemplateId: UUID
+    -scannerKeyFingerprint: str
+    +zone: AccessZone
+    +confidence: float
+    +reason: DeniedAccessReason
+    +occurredAt: datetime
+  }
+  class Notification {
+    +eventType: NotificationType
+    +payload: dict
+    +isRead: bool
+    +readAt: datetime
+  }
+  class TimetableSession {
+    +resourceName: str
+    +resourceType: BookingResourceType
+    +startsAt: datetime
+    +endsAt: datetime
+    +capacity: int
+    +allocatedCount: int
+    +isFull() bool
+    +spotsLeft() int
+  }
+  class ResourceType {
+    <<planned>>
+    +name: str
+    +requiresUnit: bool
+  }
+  class EquipmentUnit {
+    +name: str
+    +equipmentType: str
+    +zone: str
+    +inService: bool
+  }
+  class EquipmentFault {
+    +description: str
+    +status: FaultStatus
+    +reviewedAt: datetime
+    +resolvedAt: datetime
+  }
+
+  User "1" *-- "0..1" MemberProfile : profile
+  User "1" *-- "0..*" RefreshToken : sessions
+  User ..> UserRole
+  User "1" --> "0..*" Membership : holds
+  Membership "0..*" --> "1" MembershipPlan : on
+  MembershipPlan "1" *-- "0..*" PlanEntitlement : includes
+  User "1" --> "0..*" Booking : makes
+  User "1" --> "0..*" WaitlistEntry : joins
+  User "1" --> "0..*" AccessLog : generates
+  AccessLog "0..*" --> "0..1" User : performed by staff
+  Booking "0..*" --> "1" TimetableSession : for
+  TimetableSession "1" *-- "0..*" WaitlistEntry : queue
+  TimetableSession "0..*" --> "1" ResourceType : of
+  TimetableSession "0..*" --> "0..1" EquipmentUnit : slot on
+  EquipmentUnit "1" *-- "0..*" EquipmentFault : faults
+  User "1" --> "0..*" EquipmentFault : reports
+  Membership "1" *-- "0..*" StripeEvent : processed
+  User "1" *-- "0..*" Notification : receives
+
+  note for DeniedAccessAttempt "Logged even when<br>no member matches"
+  note for TimetableSession "When full, eligible members<br>queue; a freed place is<br>offered to the next"
+
+  style ResourceType fill:#f4f4f4,stroke:#888,stroke-dasharray:5 5

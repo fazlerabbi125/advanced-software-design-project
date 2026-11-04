@@ -1,7 +1,8 @@
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.core.dependencies import DbSessionDep
 from app.modules.auth.dependencies import CurrentUser
@@ -13,6 +14,7 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 @router.get(
     "/stream",
+    response_class=EventSourceResponse,
     description="Stream unread and live notifications for the signed-in member.",
 )
 async def stream_notifications(
@@ -20,12 +22,9 @@ async def stream_notifications(
     current_user: CurrentUser,
     session: DbSessionDep,
     feed: NotificationFeedDep,
-) -> StreamingResponse:
-    return StreamingResponse(
-        feed.stream(session, current_user.id, request.is_disconnected),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+) -> AsyncIterator[ServerSentEvent]:
+    async for event in feed.stream(session, current_user.id, request.is_disconnected):
+        yield event
 
 
 @router.patch(

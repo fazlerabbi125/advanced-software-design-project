@@ -11,10 +11,7 @@ from app.modules.bookings.schemas import (
     CreateBookingRequest,
     SessionWaitlistResponse,
 )
-from app.modules.notifications.dependencies import (
-    NotificationObserverDep,
-    NotificationPublisherDep,
-)
+from app.modules.notifications.dependencies import NotificationPublisherDep
 from app.shared.pagination import CursorParamsDep, CursorResponse
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
@@ -43,7 +40,6 @@ async def create_booking(
     current_user: CurrentUser,
     session: DbSessionDep,
     service: BookingServiceDep,
-    notifications: NotificationObserverDep,
     publisher: NotificationPublisherDep,
 ) -> Any:
     pending_notifications: list = []
@@ -94,7 +90,6 @@ async def accept_waitlist_offer(
     current_user: CurrentUser,
     session: DbSessionDep,
     service: BookingServiceDep,
-    notifications: NotificationObserverDep,
     publisher: NotificationPublisherDep,
 ) -> Any:
     pending_notifications: list = []
@@ -161,7 +156,6 @@ async def cancel_booking(
     current_user: CurrentUser,
     session: DbSessionDep,
     service: BookingServiceDep,
-    notifications: NotificationObserverDep,
     publisher: NotificationPublisherDep,
 ) -> Any:
     pending_notifications: list = []

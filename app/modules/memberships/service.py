@@ -323,24 +323,30 @@ class MembershipService:
     async def cancel(
         self, session: AsyncSession, pending_notifications: list, user_id: UUID
     ) -> Membership:
-        """Cancel the member's currently active membership."""
+        """Cancel every currently active membership for the member."""
         await self.lock_member(session, user_id)
         today = datetime.now(UTC).date()
-        membership = await session.scalar(
-            select(Membership)
-            .where(
-                Membership.user_id == user_id,
-                Membership.status == MembershipStatus.ACTIVE,
-                Membership.starts_on <= today,
-                Membership.ends_on >= today,
-            )
-            .options(selectinload(Membership.plan))
-            .order_by(Membership.id.desc())
-            .limit(1)
+        memberships = list(
+            (
+                await session.scalars(
+                    select(Membership)
+                    .where(
+                        Membership.user_id == user_id,
+                        Membership.status == MembershipStatus.ACTIVE,
+                        Membership.starts_on <= today,
+                        Membership.ends_on >= today,
+                    )
+                    .options(selectinload(Membership.plan))
+                    .order_by(Membership.id.desc())
+                    .with_for_update()
+                )
+            ).all()
         )
-        if membership is None:
+        if not memberships:
             raise AppError("you do not have an active membership", HTTPStatus.NOT_FOUND)
-        state_of(membership, today).cancel(membership)
+        for membership in memberships:
+            state_of(membership, today).cancel(membership)
+        membership = memberships[0]
         await self._record(
             session,
             pending_notifications,
@@ -350,9 +356,7 @@ class MembershipService:
         )
         return membership
 
-    async def renew(
-        self, session: AsyncSession, pending_notifications: list, user_id: UUID
-    ) -> PurchaseResult:
+    async def renew(self, session: AsyncSession, user_id: UUID) -> PurchaseResult:
         """Renew the member's latest membership on the same plan.
 
         What a renewal does depends on the membership's state (see states.py).
@@ -375,7 +379,11 @@ class MembershipService:
             raise AppError(
                 "this plan is no longer on sale, please choose another", HTTPStatus.NOT_FOUND
             )
-        terms = state_of(membership, today).renewal_terms(membership, plan.duration_days, today)
+        membership_state = state_of(membership, today)
+        terms = membership_state.renewal_terms(membership, plan.duration_days, today)
+        renewed_from_membership_id = (
+            membership.id if membership_state.status == MembershipStatus.ACTIVE else None
+        )
 
         payment = await self.payment_gateway.create_checkout(
             plan.price_minor, plan.currency, plan_name=plan.name
@@ -396,6 +404,7 @@ class MembershipService:
             ends_on=terms.ends_on,
             payment_reference=payment.reference,
             stripe_session_id=payment.reference,
+            renewed_from_membership_id=renewed_from_membership_id,
         )
         session.add(membership)
         await session.flush()
