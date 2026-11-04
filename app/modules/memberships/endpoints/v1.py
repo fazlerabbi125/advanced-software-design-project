@@ -15,10 +15,7 @@ from app.modules.memberships.schemas import (
     PurchaseResponse,
     UpdatePlanRequest,
 )
-from app.modules.notifications.dependencies import (
-    NotificationObserverDep,
-    NotificationPublisherDep,
-)
+from app.modules.notifications.dependencies import NotificationPublisherDep
 from app.shared.pagination import CursorParamsDep, CursorResponse, PageParamsDep, PageResponse
 
 router = APIRouter(prefix="/memberships", tags=["memberships"])
@@ -161,7 +158,6 @@ async def cancel_my_membership(
     current_user: CurrentUser,
     session: DbSessionDep,
     service: MembershipServiceDep,
-    notifications: NotificationObserverDep,
     publisher: NotificationPublisherDep,
 ) -> Any:
     try:
@@ -187,12 +183,9 @@ async def renew_my_membership(
     current_user: CurrentUser,
     session: DbSessionDep,
     service: MembershipServiceDep,
-    notifications: NotificationObserverDep,
-    publisher: NotificationPublisherDep,
 ) -> Any:
     try:
-        pending_notifications: list = []
-        result = await service.renew(session, pending_notifications, current_user.id)
+        result = await service.renew(session, current_user.id)
     except AppError as error:
         await session.rollback()
         raise http_error(error) from error
@@ -200,5 +193,4 @@ async def renew_my_membership(
         await session.rollback()
         raise
     await session.commit()
-    await publisher.publish_many(pending_notifications)
     return result
