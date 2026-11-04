@@ -10,10 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.config import Settings, get_settings
 from app.core.dependencies import DbSessionDep
-from app.modules.notifications.dependencies import (
-    NotificationObserverDep,
-    NotificationPublisherDep,
-)
+from app.modules.notifications.dependencies import NotificationPublisherDep
 from app.modules.payments.dependencies import StripeWebhookServiceDep
 
 logger = logging.getLogger(__name__)
@@ -30,7 +27,6 @@ async def stripe_webhook(
     request: Request,
     session: DbSessionDep,
     service: StripeWebhookServiceDep,
-    notifications: NotificationObserverDep,
     publisher: NotificationPublisherDep,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, str]:

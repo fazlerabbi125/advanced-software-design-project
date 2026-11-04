@@ -281,7 +281,7 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
 
         async with self.sessions() as session:
             renewal = await MembershipService(PendingPaymentGateway("checkout-success")).renew(
-                session, [], user_id
+                session, user_id
             )
             await session.commit()
             renewal_id = renewal.membership.id
@@ -333,7 +333,7 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
 
         async with self.sessions() as session:
             renewal = await MembershipService(PendingPaymentGateway("checkout-failure")).renew(
-                session, [], user_id
+                session, user_id
             )
             await session.commit()
             renewal_id = renewal.membership.id
@@ -374,7 +374,7 @@ class PlanServiceTests(unittest.IsolatedAsyncioTestCase):
 
         async with self.sessions() as session:
             renewal = await MembershipService(PendingPaymentGateway("checkout-expired")).renew(
-                session, [], user_id
+                session, user_id
             )
 
         self.assertIsNone(renewal.membership.renewed_from_membership_id)

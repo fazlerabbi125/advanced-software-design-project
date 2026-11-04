@@ -356,9 +356,7 @@ class MembershipService:
         )
         return membership
 
-    async def renew(
-        self, session: AsyncSession, pending_notifications: list, user_id: UUID
-    ) -> PurchaseResult:
+    async def renew(self, session: AsyncSession, user_id: UUID) -> PurchaseResult:
         """Renew the member's latest membership on the same plan.
 
         What a renewal does depends on the membership's state (see states.py).
