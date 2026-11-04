@@ -145,26 +145,6 @@ is complete.
 The builder keeps data-gathering details out of the booking operation and prevents a
 partially populated context from reaching the business rules.
 
-### Interceptor — apply cross-cutting CORS handling in the request pipeline
-
-**Intent:** allow a framework to run an out-of-band service at defined processing
-points without changing every endpoint. Here the cross-cutting concern is browser
-cross-origin policy, not gym business logic.
-
-- **Concrete Framework:** FastAPI/Starlette provides the HTTP request-processing
-  pipeline.
-- **Dispatcher:** the framework's middleware stack calls registered middleware for
-  each request and response.
-- **ConcreteInterceptor:** FastAPI's `CORSMiddleware` handles CORS preflight
-  requests and adds CORS headers for origins allowed by its configuration.
-- **Application:** `app/main.py` registers the interceptor with
-  `app.add_middleware(...)`; debug mode and production mode supply different CORS
-  settings.
-
-This is a framework-provided Interceptor use, rather than a custom BFS Gym
-interceptor hierarchy. It keeps the endpoint handlers focused on API operations
-instead of repeating CORS policy logic.
-
 ### Decorator — wrap the HTTP application with CORS behaviour
 
 **Intent:** attach a responsibility to an object by wrapping it, instead of changing
@@ -191,7 +171,7 @@ The project follows a **modular monolithic MVC/REST architecture**:
 
 - **Models** (`app/models/`) — SQLAlchemy ORM models define the database schema.
 - **Services** (`app/modules/*/service.py`, `app/modules/*/*_service.py`) — contain all business logic; routers never query the database directly.
-- **Routers/Controllers** (`app/modules/*/endpoints/v1.py`) — FastAPI route handlers that validate requests, call services, and return responses.
+- **Routers/Controllers** (`app/api/*`, `app/modules/*/endpoints/v1.py`) — FastAPI route handlers that validate requests, call services, and return responses.
 
 ### Data Models & Entity Relationships
 
@@ -359,16 +339,6 @@ external API key.
    A valid member with the required entitlement receives `201`. Unknown template IDs and confidence
    below the threshold receive specific `403` responses; a full VIP area returns `409`. Each rejection
    is recorded in `denied_access_attempts` with a hashed device-key fingerprint.
-
-## Why No Celery
-
-Celery was originally added as a notification queue placeholder, but it is not needed:
-
-- **Stripe webhooks** are signature-verified synchronously inside the FastAPI endpoint — no background queue is needed. A verified paid Checkout event atomically records its event ID and activates the matching pending membership.
-- **In-app notifications** are delivered via Redis Pub/Sub + Server-Sent Events (SSE) — this is instant push delivery; a queue would only add latency.
-- **Periodic background jobs** (waitlist expiry, no-show detection) are handled by APScheduler, which runs inside the FastAPI process with no extra Docker service or infrastructure.
-
-Removing Celery simplifies the stack from three services (API + Celery worker + queue-Redis) to one (API), while the Redis container that already exists for VIP occupancy is reused for Pub/Sub.
 
 ## Local Development
 
