@@ -1,0 +1,49 @@
+sequenceDiagram
+  autonumber
+  participant SC as Face<br/>scanner
+  participant R as access<br/>router
+  participant BA as :ScannerCheck<br/>InService
+  participant AS as :Access<br/>Service
+  participant P as :VipArea<br/>Policy
+  participant ZO as :Zone<br/>Occupancy
+  participant DB as PostgreSQL
+
+  Note over SC: matches face
+  SC->>+R: POST /access/device-check-in<br/>templateId, confidence, X-Device-Key
+  R->>R: zone from device key
+  break unknown key
+    R-->>SC: 401
+  end
+  R->>+BA: checkIn(session, request, scanner)
+  alt confidence < 0.80 or unknown template
+    BA->>DB: add DeniedAccessAttempt
+    BA-->>R: AppError(403)
+    R->>DB: commit
+    R-->>SC: 403
+  end
+  BA->>DB: find MemberProfile by templateId
+  BA->>+AS: checkIn(memberId, zone)
+  AS->>DB: load User (refused if disabled)
+  AS->>+P: check(memberId, zone)
+  P->>DB: VIP entitlement in plan?
+  P->>+ZO: enter(zone, memberId,<br/>stay, capacity)
+  ZO->>ZO: Redis Lua script<br/>(one atomic step)
+  ZO-->>-P: ADMITTED or<br/>WAITLISTED(n)
+  alt not entitled, disabled or room full
+    P-->>AS: AppError(403) / AppError(409, n)
+    AS-->>BA: error
+    BA->>DB: add DeniedAccessAttempt
+    BA-->>R: AppError(403 or 409)
+    R->>DB: commit
+    R-->>SC: 403, or 409 with waiting-list number n
+  end
+  P-->>-AS: tookNewPlace
+  AS->>DB: add AccessLog
+  AS-->>-BA: CheckInResult
+  BA-->>-R: CheckInResult
+  R->>DB: commit
+  opt commit fails
+    R->>ZO: releasePlace(memberId, zone)
+  end
+  R-->>-SC: 201 granted
+  Note over BA,ZO: Gym floor: GymFloorPolicy, no capacity limit.<br/>Planned: booking checks for studio, pool, stations.

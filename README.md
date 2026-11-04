@@ -556,6 +556,7 @@ uv run ruff format --check .
 |---|---|
 | Scenario narrative | Report section 1 |
 | Use-case diagrams | Report section 4.2 |
+| UML diagram sources (PlantUML and Mermaid) | [`docs/diagrams/`](docs/diagrams/README.md) |
 | Design-pattern roles and code mapping | [Design Patterns Used](#design-patterns-used) |
 | Automated tests | `tests/` directory (Unit, Integration, and DB tests) |
 | CI/CD | `.github/workflows/ci.yml` (Lint, DB Integration Tests, Metrics) |
