@@ -555,9 +555,9 @@ uv run ruff format --check .
 | Rubric Item | Evidence location |
 |---|---|
 | Scenario narrative | Report section 1 |
-| Use-case diagrams | Report section 3, UML artefacts |
+| Use-case diagrams | Report section 4.2 |
 | Design-pattern roles and code mapping | [Design Patterns Used](#design-patterns-used) |
 | Automated tests | `tests/` directory (Unit, Integration, and DB tests) |
 | CI/CD | `.github/workflows/ci.yml` (Lint, DB Integration Tests, Metrics) |
 | Metrics + refactoring | `BookingService.create` refactored (complexity 10 -> 2), Radon CI job |
-| AI Chain of Responsibility (Feature A) | `docs/implementation-guide.md#optional-ai-features` *(OpenCV photo quality check)* |
+| AI Chain of Responsibility (Feature A) | `app/modules/members/photo_validation.py` *(OpenCV photo quality check)* |
