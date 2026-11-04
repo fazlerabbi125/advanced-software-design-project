@@ -5,6 +5,7 @@ final code on `main` (4 November 2026).
 
 | File | Report figure | Source format | What it shows |
 |---|---|---|---|
+| `00-use-cases.drawio` (pages UCD1, UCD2, UCD3) | 4.1, 4.2, 4.3 | draw.io | Use-case diagrams: Booking & Waitlist, Biometric Check-in, Operations & Admin |
 | `01-architecture` | 5.1 | Mermaid | Architecture overview: routers, services, entities and the Docker services |
 | `07-package-diagram` | 5.2 | SVG only (hand laid out) | High-level package diagram from the code's imports |
 | `02a-class-domain` | 6.1 | Mermaid | Domain classes |
@@ -26,6 +27,8 @@ PlantUML (the UML workbench used for section 10, version 1.2026.9):
 ```bash
 plantuml -tpng -Sdpi=200 docs/diagrams/09-design-package.puml
 ```
+
+draw.io: open `00-use-cases.drawio` at https://app.diagrams.net (File > Open from > Device) and export each page as PNG or SVG.
 
 Mermaid: paste the `.mmd` file into https://mermaid.live, or render it with the
 Mermaid CLI:
