@@ -1,0 +1,55 @@
+@startuml
+set separator none
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 13
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam node {
+  BackgroundColor #FFFFFF
+  BorderColor #333333
+}
+skinparam artifact {
+  BackgroundColor #FFFFFF
+  BorderColor #333333
+}
+skinparam database {
+  BackgroundColor #FFFFFF
+  BorderColor #333333
+}
+
+node "Client device" <<device>> as ClientDev {
+  artifact "Browser (Swagger UI)\nor Postman" as Client
+}
+node "Face scanner" <<device>> as ScannerDev
+
+node "Host machine" <<device>> {
+  node "Docker Compose" <<execution environment>> {
+    node "api" <<container>> as api {
+      artifact "FastAPI app\non Uvicorn, Python 3.13" as app
+    }
+    node "migrate" <<container>> as migrate {
+      artifact "Alembic migrations" as alembic
+    }
+    node "postgres" <<container>> as pg {
+      database "PostgreSQL 18" as db
+    }
+    node "cache-redis" <<container>> as redis {
+      database "Redis 8" as rd
+    }
+    node "stripe-listener" <<container>> as cli {
+      artifact "Stripe CLI" as stripecli
+    }
+  }
+}
+
+cloud "Stripe test mode" <<external system>> as Stripe
+
+Client --> api : HTTP :8000
+ScannerDev --> api : HTTP :8000
+api --> pg : TCP :5432
+api --> redis : TCP :6379
+migrate --> pg : TCP :5432
+api --> Stripe : HTTPS
+cli --> Stripe : HTTPS (outbound)
+cli --> api : webhook, HTTP :8000
+@enduml

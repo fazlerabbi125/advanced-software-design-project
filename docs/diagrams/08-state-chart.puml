@@ -1,0 +1,30 @@
+@startuml
+skinparam defaultFontName Helvetica
+skinparam defaultFontSize 13
+skinparam shadowing false
+skinparam ArrowColor #333333
+skinparam state {
+  BackgroundColor #FFFFFF
+  BorderColor #333333
+}
+hide empty description
+
+state Pending
+state Active
+state Expired
+state Cancelled
+
+Pending : cancel(), renew() / rejected (409)
+Active : renew() / create Pending successor,\nends_on + plan duration
+Expired : renew() / create Pending successor,\nstarting today
+Expired : cancel() / rejected (409)
+Cancelled : cancel(), renew() / rejected (409)
+
+[*] --> Pending : purchase() [no Active or Pending membership]\nor renew() [no Pending membership]\n/ create Stripe Checkout session
+Pending --> Active : checkout completed [paid]\n/ notify payment confirmed
+Pending --> Cancelled : checkout expired\nor payment failed
+Active --> Expired : [ends_on < today]
+Active --> Cancelled : cancel()\n/ access stops, no refund
+Active --> Cancelled : successor paid\n[renewed_from = this]
+Cancelled --> [*]
+@enduml
