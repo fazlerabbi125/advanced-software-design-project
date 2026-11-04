@@ -1,0 +1,151 @@
+erDiagram
+  DENIED_ACCESS_ATTEMPTS {
+    int id PK
+    uuid biometric_template_id
+    string scanner_key_fingerprint
+    string zone
+    float confidence
+    string reason
+    datetime occurred_at
+  }
+  USERS ||--o| MEMBER_PROFILES : has
+  USERS ||--o{ REFRESH_TOKENS : owns
+  USERS ||--o{ MEMBERSHIPS : holds
+  MEMBERSHIP_PLANS ||--o{ MEMBERSHIPS : "bought as"
+  MEMBERSHIP_PLANS ||--o{ PLAN_ENTITLEMENTS : includes
+  USERS ||--o{ BOOKINGS : makes
+  TIMETABLE_SESSIONS ||--o{ BOOKINGS : "booked as"
+  TIMETABLE_SESSIONS ||--o{ WAITLIST_ENTRIES : queues
+  USERS ||--o{ WAITLIST_ENTRIES : joins
+  USERS ||--o{ ACCESS_LOGS : generates
+  USERS |o--o{ ACCESS_LOGS : "checks in (staff)"
+  EQUIPMENT_UNITS |o--o{ TIMETABLE_SESSIONS : "slots on"
+  EQUIPMENT_UNITS ||--o{ EQUIPMENT_FAULTS : has
+  USERS ||--o{ EQUIPMENT_FAULTS : reports
+  MEMBERSHIPS ||--o{ STRIPE_EVENTS : "activated by"
+  MEMBERSHIPS |o--o{ MEMBERSHIPS : "renewed from"
+  USERS ||--o{ NOTIFICATIONS : receives
+  MEMBER_PROFILES |o..o{ DENIED_ACCESS_ATTEMPTS : "template id (no FK)"
+
+  USERS {
+    uuid id PK
+    string email UK
+    string password_hash
+    string role
+    bool is_active
+  }
+  MEMBER_PROFILES {
+    int id PK
+    uuid user_id FK,UK
+    string name
+    string phone
+    date date_of_birth
+    uuid biometric_template_id UK
+    string biometric_image_key UK
+    string biometric_content_type
+    datetime biometric_uploaded_at
+  }
+  REFRESH_TOKENS {
+    int id PK
+    uuid user_id FK
+    string jti UK
+    string family_id
+    datetime expires_at
+    datetime revoked_at
+  }
+  MEMBERSHIP_PLANS {
+    int id PK
+    string name UK
+    int price_minor
+    string currency
+    int duration_days
+    int booking_window_days
+    int weekly_booking_limit
+    bool is_active
+  }
+  PLAN_ENTITLEMENTS {
+    int id PK
+    int plan_id FK
+    string entitlement
+  }
+  MEMBERSHIPS {
+    int id PK
+    uuid user_id FK
+    int plan_id FK
+    string status
+    date starts_on
+    date ends_on
+    string payment_reference UK
+    string stripe_session_id UK
+    int renewed_from_membership_id FK
+  }
+  STRIPE_EVENTS {
+    int id PK
+    string stripe_event_id UK
+    int membership_id FK
+  }
+  TIMETABLE_SESSIONS {
+    int id PK
+    string resource_name
+    string resource_type
+    datetime starts_at
+    datetime ends_at
+    int capacity
+    int allocated_count
+    int station_count
+    int equipment_unit_id FK
+  }
+  BOOKINGS {
+    int id PK
+    uuid user_id FK
+    int timetable_session_id FK
+    string resource_name
+    string resource_type
+    datetime starts_at
+    datetime ends_at
+    string status
+  }
+  WAITLIST_ENTRIES {
+    int id PK
+    int session_id FK
+    uuid user_id FK
+    string status
+    datetime offered_at
+  }
+  ACCESS_LOGS {
+    int id PK
+    uuid member_id FK
+    string event
+    string zone
+    string source
+    datetime occurred_at
+    uuid performed_by_staff_id FK
+    string staff_reason
+  }
+  EQUIPMENT_UNITS {
+    int id PK
+    string name UK
+    string equipment_type
+    string zone
+    bool in_service
+  }
+  EQUIPMENT_FAULTS {
+    int id PK
+    int unit_id FK
+    uuid reported_by_id FK
+    string description
+    string status
+    uuid reviewed_by_id FK
+    datetime reviewed_at
+    uuid resolved_by_id FK
+    datetime resolved_at
+  }
+  NOTIFICATIONS {
+    int id PK
+    uuid user_id FK
+    string event_type
+    json payload
+    bool is_read
+    datetime read_at
+    datetime created_at
+  }

@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 40 1350 765" width="1350" height="765" font-family="Arial, Helvetica, sans-serif">
+<defs>
+<marker id="arr" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M1 1 L11 6 L1 11" fill="none" stroke="#666" stroke-width="1.5"/></marker>
+<marker id="arrW" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M1 1 L11 6 L1 11" fill="none" stroke="#b26a00" stroke-width="1.5"/></marker>
+</defs>
+<rect width="1350" height="805" fill="#fff"/>
+<rect x="70" y="60" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="70" y="76" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="175.0" y="106" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">app.main</text>
+<text x="175.0" y="128" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">FastAPI app, lifespan</text>
+<rect x="320" y="60" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="320" y="76" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="425.0" y="106" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">app.api</text>
+<text x="425.0" y="128" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">v1 router, mounts modules</text>
+<line x1="280" y1="111" x2="318" y2="111" stroke="#666" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+<path d="M820 70 H1264 L1280 86 V146 H820 Z" fill="#fff8dc" stroke="#b39b52"/>
+<path d="M1264 70 V86 H1280" fill="none" stroke="#b39b52"/>
+<text x="834" y="92" font-size="13" font-weight="normal" font-style="normal" text-anchor="start" fill="#2b2b2b">Arrows: imports between packages.</text>
+<text x="834" y="111" font-size="13" font-weight="normal" font-style="normal" text-anchor="start" fill="#2b2b2b">Imports of auth (all modules</text>
+<text x="834" y="130" font-size="13" font-weight="normal" font-style="normal" text-anchor="start" fill="#2b2b2b">except payments) are omitted.</text>
+<rect x="40" y="180" width="108.6" height="24" fill="#fbfbfa" stroke="#2b2b2b" stroke-width="1.4"/>
+<rect x="40" y="204" width="1270" height="336" fill="#fbfbfa" stroke="#2b2b2b" stroke-width="1.4"/>
+<text x="48" y="197" font-size="15" font-weight="bold" font-style="normal" text-anchor="start" fill="#2b2b2b">app.modules</text>
+<text x="1296" y="226" font-size="13" font-weight="normal" font-style="italic" text-anchor="end" fill="#555">one package per business area</text>
+<line x1="425.0" y1="146" x2="425.0" y2="202" stroke="#666" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+<rect x="70" y="250" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="70" y="266" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="175.0" y="296" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">timetable_sessions</text>
+<text x="175.0" y="318" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">classes, equipment slots</text>
+<rect x="320" y="250" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="320" y="266" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="425.0" y="296" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">facilities</text>
+<text x="425.0" y="318" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">equipment, faults</text>
+<rect x="570" y="250" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="570" y="266" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="675.0" y="296" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">bookings</text>
+<text x="675.0" y="318" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">Builder, Chain of Resp., jobs</text>
+<line x1="530" y1="301" x2="568" y2="301" stroke="#666" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+<rect x="820" y="250" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="820" y="266" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="925.0" y="296" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">memberships</text>
+<text x="925.0" y="318" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">State, Factory Method</text>
+<line x1="780" y1="301" x2="818" y2="301" stroke="#666" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+<rect x="1070" y="250" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="1070" y="266" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="1175.0" y="296" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">notifications</text>
+<text x="1175.0" y="318" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">Observer</text>
+<line x1="1030" y1="301" x2="1068" y2="301" stroke="#666" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+<rect x="70" y="420" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="70" y="436" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="175.0" y="466" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">members</text>
+<text x="175.0" y="488" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">profiles, photo checks (CoR)</text>
+<rect x="320" y="420" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="320" y="436" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="425.0" y="466" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">auth</text>
+<text x="425.0" y="488" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">JWT, roles</text>
+<rect x="820" y="420" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="820" y="436" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="925.0" y="466" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">access</text>
+<text x="925.0" y="488" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">Strategy, biometric check-in</text>
+<rect x="1070" y="420" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="1070" y="436" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="1175.0" y="466" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">payments</text>
+<text x="1175.0" y="488" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">Stripe Checkout, webhook</text>
+<line x1="925.0" y1="436" x2="925.0" y2="338" stroke="#666" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+<line x1="1175.0" y1="436" x2="1175.0" y2="338" stroke="#666" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+<rect x="40" y="610" width="100.0" height="24" fill="#fbfbfa" stroke="#2b2b2b" stroke-width="1.4"/>
+<rect x="40" y="634" width="1270" height="146" fill="#fbfbfa" stroke="#2b2b2b" stroke-width="1.4"/>
+<text x="48" y="627" font-size="15" font-weight="bold" font-style="normal" text-anchor="start" fill="#2b2b2b">foundation</text>
+<text x="1296" y="656" font-size="13" font-weight="normal" font-style="italic" text-anchor="end" fill="#555">shared by every module</text>
+<rect x="70" y="670" width="70" height="16" fill="#fff3e0" stroke="#b26a00" stroke-width="1.2"/>
+<rect x="70" y="686" width="210" height="70" fill="#fff3e0" stroke="#b26a00" stroke-width="1.2"/>
+<text x="175.0" y="716" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">app.storage</text>
+<text x="175.0" y="738" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">biometric images</text>
+<rect x="320" y="670" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="320" y="686" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="425.0" y="716" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">app.models</text>
+<text x="425.0" y="738" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">SQLAlchemy entities</text>
+<rect x="570" y="670" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="570" y="686" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="675.0" y="716" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">app.core</text>
+<text x="675.0" y="738" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">config, DB, Redis, scheduler</text>
+<rect x="820" y="670" width="70" height="16" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<rect x="820" y="686" width="210" height="70" fill="#f7f7f4" stroke="#2b2b2b" stroke-width="1.2"/>
+<text x="925.0" y="716" font-size="15" font-weight="bold" font-style="normal" text-anchor="middle" fill="#2b2b2b">app.shared</text>
+<text x="925.0" y="738" font-size="13" font-weight="normal" font-style="normal" text-anchor="middle" fill="#444">constants, helpers</text>
+<line x1="675.0" y1="686" x2="675.0" y2="338" stroke="#666" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+<text x="685.0" y="378" font-size="13" font-weight="normal" font-style="italic" text-anchor="start" fill="#666">scheduler runs booking jobs</text>
+<line x1="189.0" y1="506" x2="189.0" y2="684" stroke="#b26a00" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arrW)"/>
+<line x1="161.0" y1="686" x2="161.0" y2="508" stroke="#b26a00" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arrW)"/>
+<text x="201.0" y="590" font-size="13" font-weight="normal" font-style="italic" text-anchor="start" fill="#b26a00">import cycle</text>
+<line x1="1175.0" y1="540" x2="1175.0" y2="632" stroke="#666" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arr)"/>
+<text x="1163.0" y="592" font-size="13" font-weight="normal" font-style="italic" text-anchor="end" fill="#666">every module uses models, core, shared</text>
+</svg>

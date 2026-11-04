@@ -1,0 +1,48 @@
+sequenceDiagram
+  autonumber
+  actor M as Member
+  participant R as bookings<br/>router
+  participant BS as :Booking<br/>Service
+  participant CB as :Context<br/>Builder
+  participant MS as :Membership<br/>Service
+  participant EC as :Eligibility<br/>chain
+  participant NO as :Notification<br/>Observer
+  participant DB as PostgreSQL
+  participant RD as Redis
+
+  M->>+R: POST /bookings<br/>{sessionId}
+  R->>+BS: create(session, pending,<br/>userId, sessionId)
+  BS->>DB: lock session row
+  BS->>DB: lock member row
+  BS->>+CB: withSession(session)
+  CB->>+MS: bookingMembership(userId)
+  MS->>DB: load membership,<br/>plan, entitlements
+  MS-->>-CB: membership
+  CB->>DB: load week's bookings,<br/>count recent no-shows
+  CB-->>-BS: build(): context
+  BS->>+EC: handle(context)
+  loop each rule
+    EC->>EC: check(context)
+  end
+  EC-->>-BS: failures
+  alt one or more failures
+    BS-->>R: AppError(422, failures)
+    R->>DB: rollback
+    R-->>M: 422, every failed rule
+  else session full
+    BS->>DB: add WaitlistEntry
+    BS-->>R: AppError(409, position,<br/>commit required)
+    R->>DB: commit
+    R-->>M: 409, waiting-list position
+  else place free
+    opt planned
+      BS->>DB: allocate unit<br/>(station or lane)
+    end
+    BS->>DB: insert Booking (Confirmed),<br/>allocated + 1
+    BS->>NO: observe(pending,<br/>BOOKING_CONFIRMED)
+    NO->>DB: add Notification
+    BS-->>-R: booking
+    R->>DB: commit
+    R-)RD: publishMany(pending),<br/>SSE to the member
+    R-->>-M: 201 Created
+  end

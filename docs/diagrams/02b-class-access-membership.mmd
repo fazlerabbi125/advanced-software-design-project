@@ -1,0 +1,84 @@
+classDiagram
+  direction TB
+  class ScannerCheckInService {
+    +checkIn(request: DeviceCheckInRequest, scanner: AuthenticatedScanner) CheckInResult
+    -recordDenial(request, scanner, reason: DeniedAccessReason) void
+  }
+  class AccessService {
+    -policies: Map~AccessZone, AccessPolicy~
+    +checkIn(memberId: UUID, zone: AccessZone, source: str) CheckInResult
+    +checkOut(memberId: UUID, zone: AccessZone) AccessLog
+    +currentOccupancy() Map~str, int~
+    +releasePlace(memberId: UUID, zone: AccessZone) void
+  }
+  class AccessPolicy {
+    <<interface>>
+    +check(memberId: UUID, zone: AccessZone) bool
+  }
+  class GymFloorPolicy {
+    +check(memberId: UUID, zone: AccessZone) bool
+  }
+  class VipAreaPolicy {
+    -capacity: int
+    +check(memberId: UUID, zone: AccessZone) bool
+  }
+  class ZoneOccupancy {
+    +enter(zone: str, memberId: UUID, staySeconds: int, capacity: int) Entry
+    +leave(zone: str, memberId: UUID) void
+    +count(zone: str) int
+    +waitlistPosition(zone: str, memberId: UUID) int
+  }
+  class MembershipService {
+    +purchase(userId: UUID, planId: int) PurchaseResult
+    +renew(userId: UUID) PurchaseResult
+    +cancel(userId: UUID) Membership
+    +hasEntitlement(userId: UUID, entitlement: MembershipEntitlement) bool
+    +bookingMembership(userId: UUID, day: date) Membership
+  }
+  class PaymentGateway {
+    <<interface>>
+    +createCheckout(amountMinor: int, currency: str, planName: str) PaymentResult
+  }
+  class StripeCheckoutGateway {
+    -successUrl: str
+    -cancelUrl: str
+    +createCheckout(amountMinor: int, currency: str, planName: str) PaymentResult
+  }
+  class PaymentGatewayFactory {
+    +create(settings: Settings) PaymentGateway$
+  }
+  class StripeWebhookService {
+    +processCheckout(stripeEventId: str, stripeSessionId: str, paymentSucceeded: bool) str
+  }
+  class MembershipState {
+    <<abstract>>
+    +cancel(membership: Membership) void*
+    +renewalTerms(membership: Membership, durationDays: int, today: date) RenewalTerms*
+  }
+  class ActiveState
+  class ExpiredState
+  class CancelledState
+  class PendingState
+
+  ScannerCheckInService --> AccessService : checkIn()
+  AccessService "1" o-- "1..*" AccessPolicy : policy per zone
+  AccessPolicy <|.. GymFloorPolicy
+  AccessPolicy <|.. VipAreaPolicy
+  GymFloorPolicy --> ZoneOccupancy
+  VipAreaPolicy --> ZoneOccupancy
+  GymFloorPolicy ..> MembershipService : hasEntitlement()
+  VipAreaPolicy ..> MembershipService : hasEntitlement()
+  MembershipService --> "0..1" PaymentGateway
+  PaymentGateway <|.. StripeCheckoutGateway
+  PaymentGatewayFactory ..> StripeCheckoutGateway : creates
+  MembershipService ..> MembershipState : state of membership
+  MembershipState <|-- ActiveState
+  MembershipState <|-- ExpiredState
+  MembershipState <|-- CancelledState
+  MembershipState <|-- PendingState
+
+  note for AccessPolicy "pre: member account is active<br>post: member counted in the zone;<br>on AppError, occupancy unchanged"
+  note for PaymentGateway "pre: amountMinor > 0<br>post: PENDING with a checkout URL;<br>activates only via the webhook"
+  note for ScannerCheckInService "pre: known device key<br>post: confidence < 0.80 or unknown<br>template is refused and logged"
+  note for StripeWebhookService "pre: signature verified<br>post: activates or cancels the<br>PENDING membership once"
+  note for MembershipState "pre: the member's latest membership<br>post: only Active can be cancelled;<br>renewalTerms() changes nothing"
